@@ -55,8 +55,31 @@ h3. BizLink Power management GPIO pins
 | MCU_PWR_METER2 | _TBD_ | GPIO_ANALOG | power meter 2 |
 
 
-- - -
+h2. BizLink's proprietary FW updater
 
+Not only the type-C CC Controller FW will require to be updated, also the other chips.
+
+Consider the case when a Video or USB Converter chips (DP2HDMI, DP2VGA, USB2ETH, USB-HUB, ...) provides a SPI slave interface for online live FW upgrade. But STM32F will need to reserve the 2nd SPI interface for 2nd CC controller. What's our solution?
+
+BizLink's proprietary FW updater will handle this case:
+> BizLink FW upgrade USB protocol over D+/D- pins of Type-C host port (P0)
+> This proprietary protocol can do:
+> > Specify FW object: CC controller FW, USB-HUB FW, ...
+> > When entered FW Upgrade Alt Mode
+> > > The 2nd SPI interface will re-configured to SPI master
+> > > Enable the MOSFET to switch the SPI data/clock path from the 2nd CC port, to the corresponding SPI flash (in or out of the converter chip)
+> > > Write new FW image into the flash
+> > > Exit FW Upgrade Alt Mode back to normal type-C mode
+> BizLink FW updater suite consists of:
+> > Host side FW Upgrade APP: Windows, ...
+> > Device side tiny binary:
+> > > simple bootloader
+> > > BizLink FW upgrade USB protocol handler
+> > > SPI flash programming FW
+> > > USB device driver
+
+
+- - -
 
 h1. GPIOs for Type-C from Google
 
@@ -154,6 +177,16 @@ h2. Dual CC ports, both receptacles (SAMUS_PD)
 | USB_C1_DP_POLARITY | PF3 | GPIO_OUT_HIGH | |
 | USB_C1_DP_HPD | PF1 | GPIO_OUT_LOW | |
 
+h2. Dual CC ports (Twinkie)
+
+* CC signals
+|_.Name |_.Port |_.Type |_.Description|
+| CC1_PD | PA1 | GPIO_ANALOG | CC1 RX |
+| CC1_TX_DATA | PB4 | GPIO_OUT_LOW | CC1 TX |
+| CC1_TX_EN | PB1 | GPIO_OUT_LOW | CC1 TX Enable |
+| CC2_PD | PA3 | GPIO_ANALOG | CC2 RX |
+| CC2_TX_DATA | PA6 | GPIO_OUT_LOW | CC2 TX |
+| CC2_TX_EN | PB3 | GPIO_OUT_LOW | CC2 TX Enable |
 
 - - -
 
@@ -174,7 +207,7 @@ The portmap defined here is BizLink's dual CC design:
 | USB_P0_CC2_PD | PA4 | GPIO_ANALOG | Port 0 RX, CC2 |
 | USB_P1_CC1_PD | PA2 | GPIO_ANALOG | Port 1 RX, CC1 |
 | USB_P1_CC2_PD | PA5 | GPIO_ANALOG | Port 1 RX, CC2 |
-| USB_CCRX_REF | PA1 | GPIO_ANALOG | COMP ref voltage: 0.55V, we may use PA4 for internal DAC out, or external voltage |
+| USB_CCRX_REF | PA1 | GPIO_ANALOG | COMP ref voltage: 0.55V, we must use external voltage |
 | USB_CCRX_REF_OUT | PA4 | GPIO_ANALOG | optional, if used, then connect to PA1 |
 
 

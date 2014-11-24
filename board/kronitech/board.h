@@ -3,11 +3,38 @@
  * found in the LICENSE file.
  */
 
-/* samus_pd board configuration */
+/* kronitech board configuration */
 
 #ifndef __BOARD_H
 #define __BOARD_H
 
+/*==============================================================================*/
+/* 4 board types configurations
+ * Emulation / Host  : CONFIG_BIZ_EMU_HOST (auto set: CONFIG_BIZ_DUAL_CC)
+ * Emulation / Dock  : CONFIG_BIZ_EMU_DOCK
+ * Kronitech, P-DC   : 
+ * Kronitech, P-TypC : CONFIG_BIZ_DUAL_CC
+ */
+#if 0
+#define CONFIG_BIZ_EMU_HOST    /* HOST emulation over STM32-Discovery board */
+#define CONFIG_BIZ_EMU_DOCK    /* HOST emulation over STM32-Discovery board */
+#define CONFIG_BIZ_DUAL_CC     /* there are 2 CC ports */
+#endif
+#include "biz_board.conf"
+
+/*--------------------------------------------------------------------------*/
+#ifdef CONFIG_BIZ_EMU_HOST
+#define __BIZ_EMU_BUILD__      /* emulation over STM32-Discovery board */
+#define CONFIG_BIZ_DUAL_CC     /* there are 2 CC ports */
+#define CONFIG_USB_PD_ALT_MODE_DFP
+#endif
+
+#ifdef CONFIG_BIZ_EMU_DOCK
+#define __BIZ_EMU_BUILD__      /* emulation over STM32-Discovery board */
+#endif
+
+
+/*==============================================================================*/
 /* 48 MHz SYSCLK clock frequency */
 #define CPU_CLOCK 48000000
 
@@ -18,40 +45,37 @@
 /* Optional features */
 #define CONFIG_ADC
 #define CONFIG_BOARD_PRE_INIT
-#define CONFIG_CHARGE_MANAGER
 /* Minimum ilim = 500 mA */
 #define CONFIG_CHARGER_INPUT_CURRENT PWM_0_MA
-#undef  CONFIG_CONSOLE_CMDHELP
-#define CONFIG_FORCE_CONSOLE_RESUME
-#define CONFIG_HIBERNATE_WAKEUP_PINS (STM32_PWR_CSR_EWUP3|STM32_PWR_CSR_EWUP8)
 #define CONFIG_HW_CRC
-#define CONFIG_I2C
+#undef  CONFIG_I2C
 #undef  CONFIG_LID_SWITCH
-#define CONFIG_LOW_POWER_IDLE
-#define CONFIG_PWM
 #define CONFIG_STM_HWTIMER32
 #undef  CONFIG_TASK_PROFILING
+#define CONFIG_USB
+#define CONFIG_USB_BOS
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
-#define CONFIG_USB_PD_ALT_MODE_DFP
-#undef  CONFIG_USB_PD_COMM_ENABLED
-#define CONFIG_USB_PD_COMM_ENABLED 0
 #define CONFIG_USB_PD_CUSTOM_VDM
 #define CONFIG_USB_PD_DUAL_ROLE
-#define CONFIG_USB_PD_FLASH_ERASE_CHECK
 #define CONFIG_USB_PD_INTERNAL_COMP
-#define CONFIG_USB_SWITCH_PI3USB9281
-#undef  CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO
-#define CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO GPIO_USB_C_BC12_SEL
+#define CONFIG_USB_PD_IDENTITY_HW_VERS 1
+#define CONFIG_USB_PD_IDENTITY_SW_VERS 1
 #define CONFIG_USBC_SS_MUX
-#define CONFIG_USBC_VCONN
-#define CONFIG_VBOOT_HASH
 #undef  CONFIG_WATCHDOG_HELP
+
+#ifdef CONFIG_BIZ_EMU_HOST
+#define CONFIG_USB_PD_ALT_MODE_DFP
+#endif
 
 /* I2C ports configuration */
 #define I2C_PORT_MASTER 1
 #define I2C_PORT_SLAVE  0
 #define I2C_PORT_EC I2C_PORT_SLAVE
+
+/* USB configuration */
+#define CONFIG_USB_PID 0x5010
+#define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
 /* slave address for host commands */
 #ifdef HAS_TASK_HOSTCMD
@@ -74,35 +98,36 @@
 
 /* ADC signal */
 enum adc_channel {
-	ADC_C0_CC1_PD = 0,
-	ADC_C1_CC1_PD,
-	ADC_C0_CC2_PD,
-	ADC_C1_CC2_PD,
+	ADC_P0_CC_PD = 0,
+	ADC_P1_CC1_PD,
+	ADC_P1_CC2_PD,
 	ADC_BOOSTIN,
 	/* Number of ADC channels */
 	ADC_CH_COUNT
 };
 
-enum pwm_channel {
-	PWM_CH_ILIM = 0,
-	/* Number of PWM channels */
-	PWM_CH_COUNT
+/* USB string indexes */
+enum usb_strings {
+	USB_STR_DESC = 0,
+	USB_STR_VENDOR,
+	USB_STR_PRODUCT,
+	USB_STR_VERSION,
+	USB_STR_BB_URL,
+
+	USB_STR_COUNT
 };
 
-/* Charge suppliers */
-enum charge_supplier {
-	CHARGE_SUPPLIER_PD,
-	CHARGE_SUPPLIER_TYPEC,
-	CHARGE_SUPPLIER_BC12_DCP,
-	CHARGE_SUPPLIER_BC12_CDP,
-	CHARGE_SUPPLIER_BC12_SDP,
-	CHARGE_SUPPLIER_PROPRIETARY,
-	CHARGE_SUPPLIER_OTHER,
-	CHARGE_SUPPLIER_COUNT
-};
+#endif /* !__ASSEMBLER__ */
 
-/* supplier_priority table defined in board.c */
-extern const int supplier_priority[];
+/* USB Device class */
+#define USB_DEV_CLASS USB_CLASS_BILLBOARD
+
+/* USB interface indexes (use define rather than enum to expand them) */
+#define USB_IFACE_COUNT     0
+
+/* USB endpoint indexes (use define rather than enum to expand them) */
+#define USB_EP_CONTROL   0
+#define USB_EP_COUNT     1
 
 /* Charge current limit min / max, based on PWM duty cycle */
 #define PWM_0_MA	500
@@ -110,22 +135,5 @@ extern const int supplier_priority[];
 
 /* Map current in milli-amps to PWM duty cycle percentage */
 #define MA_TO_PWM(curr) (((curr) - PWM_0_MA) * 100 / (PWM_100_MA - PWM_0_MA))
-
-/* Called when we receive battery level info from the EC. */
-void board_update_battery_soc(int soc);
-
-/* Get the last received battery level. */
-int board_get_battery_soc(void);
-
-/* Set the active charge port. */
-void board_set_active_charge_port(int charge_port);
-
-/* Set the charge current limit. */
-void board_set_charge_limit(int charge_ma);
-
-/* Send host event to AP */
-void pd_send_host_event(int mask);
-
-#endif /* !__ASSEMBLER__ */
 
 #endif /* __BOARD_H */

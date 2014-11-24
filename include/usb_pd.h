@@ -489,7 +489,7 @@ struct pd_policy {
 
 #define HPD_DEBOUNCE_LVL    (100*MSEC)
 #define HPD_DEBOUNCE_IRQ    (2*MSEC)
-#define HPD_DEBOUNCE_GLITCH (250*USEC)
+#define HPD_DEBOUNCE_GLITCH  250 /* USEC */
 /*
  * DisplayPort Configure VDO
  * -------------------------
@@ -541,7 +541,8 @@ struct pd_policy {
 
 #define USB_GOOGLE_TYPEC_URL "http://www.google.com/chrome/devices/typec"
 /* USB Vendor ID assigned to Google Inc. */
-#define USB_VID_GOOGLE 0x18d1
+#define USB_VID_GOOGLE  0x18d1
+#define USB_VID_BIZLINK 0x06C4
 
 /* Timeout for message receive in microseconds */
 #define USB_PD_RX_TMOUT_US 2700

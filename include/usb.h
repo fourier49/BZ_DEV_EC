@@ -154,7 +154,8 @@ struct usb_endpoint_descriptor {
 #define USB_CLASS_VENDOR_SPEC             0xff
 
 /* USB Vendor ID assigned to Google Inc. */
-#define USB_VID_GOOGLE 0x18d1
+#define USB_VID_GOOGLE  0x18d1
+#define USB_VID_BIZLINK 0x06C4
 
 /* Google specific SubClass/Protocol assignments */
 #define USB_SUBCLASS_GOOGLE_SERIAL 0x50

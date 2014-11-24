@@ -2481,7 +2481,7 @@ void pd_send_hpd(int port, enum hpd_event hpd)
 				0,		      /* request exit DP */
 				0,		      /* request exit USB */
 				0,		      /* MF pref */
-				gpio_get_level(GPIO_PD_SBU_ENABLE),
+				gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
 				0,		      /* power low */
 				0x2);
 	pd_send_vdm(port, USB_SID_DISPLAYPORT,
