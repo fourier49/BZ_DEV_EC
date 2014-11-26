@@ -610,9 +610,9 @@ void pd_hw_init(int port)
 	/* Enable DAC interface clock. */
 	STM32_RCC_APB1ENR |= (1 << 29);
 	/* set voltage Vout=0.850V (Vref = 3.0V) */
-	STM32_DAC_DHR12RD = 850 * 4096 / 3000;
+	STM32_DAC_DHR12RD = CONFIG_PD_DAC_VOUT;
 	/* Start DAC channel 1 */
-	STM32_DAC_CR = STM32_DAC_CR_EN1;
+	STM32_DAC_CR = CONFIG_PD_DAC_CR;
 #endif
 
 	/* --- COMP2 as comparator for RX vs Vmid = 850mV --- */

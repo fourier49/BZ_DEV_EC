@@ -168,7 +168,7 @@ void pd_transition_voltage(int idx)
 int pd_set_power_supply_ready(int port)
 {
 	/* provide VBUS */
-#ifdef CONFIG_BIZ_DUAL_CC
+#ifdef CONFIG_BIZ_EMU_HOST
 	gpio_set_level(port ? GPIO_USB_P1_PWR_5V_EN : GPIO_USB_P0_PWR_5V_EN, 1);
 #else
 	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
@@ -183,7 +183,7 @@ int pd_set_power_supply_ready(int port)
 void pd_power_supply_reset(int port)
 {
 	/* Kill VBUS */
-#ifdef CONFIG_BIZ_DUAL_CC
+#ifdef CONFIG_BIZ_EMU_HOST
 	gpio_set_level(port ? GPIO_USB_P1_PWR_5V_EN : GPIO_USB_P0_PWR_5V_EN, 0);
 #else
 	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);

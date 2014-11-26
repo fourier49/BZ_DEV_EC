@@ -33,6 +33,7 @@
 #define __BIZ_EMU_BUILD__      /* emulation over STM32-Discovery board */
 #endif
 
+#define GPIO_PD_SBU_ENABLE     GPIO_USB_P0_SBU_ENABLE   /* get same SBU_ENABLE gpio name as HOHO */
 
 /*==============================================================================*/
 /* 48 MHz SYSCLK clock frequency */
@@ -54,6 +55,7 @@
 #undef  CONFIG_TASK_PROFILING
 #define CONFIG_USB
 #define CONFIG_USB_BOS
+#define CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_CUSTOM_VDM
@@ -66,6 +68,15 @@
 
 #ifdef CONFIG_BIZ_EMU_HOST
 #define CONFIG_USB_PD_ALT_MODE_DFP
+#define CONFIG_PD_USE_DAC_AS_REF
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3000)
+#endif
+
+#ifdef CONFIG_BIZ_EMU_DOCK
+#define CONFIG_PD_USE_DAC_AS_REF
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3000) << 16
 #endif
 
 /* I2C ports configuration */

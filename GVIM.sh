@@ -7,27 +7,32 @@ function files_list()
 	if [ "$XuCat" = "hcs" -o "$XuCat" = "wip" ]; then
 #		vimCmd="-c 'set tabstop=4'"
 #		tags="$tags,$wpath/__scratch__/_LEDProj01.tags"
-		files="$files common/system.c common/main.c "
+#		files="$files common/system.c common/main.c "
 #		files="$files common/host_command.c common/host_command_master.c common/host_event_commands.c common/host_command_pd.c "
 #		files="$files common/usb_port_power_dumb.c common/usb_port_power_smart.c "
-		files="$files include/usb_bb.h include/usb_pd.h "
+#		files="$files include/usb_bb.h "
 #		files="$files Makefile Makefile.toolchain Makefile.rules README.fmap "
 
 #		files="$files board/host/usb_pd_config.c board/host/usb_pd_config.h board/host/usb_pd_policy.c chip/host/usb_pd_phy.c "
 #		files="$files test/usb_pd.c test/host_usb_pd_phy.c test/usb_pd.tasklist test/usb_pd_test_util.h "
 
-		files="$files board/hoho/board.c board/hoho/board.h board/hoho/gpio.inc board/hoho/ec.tasklist "
-		files="$files board/hoho/usb_pd_policy.c board/hoho/usb_pd_config.h "
+		files="$files include/usb_pd.h "
 		files="$files common/usb_pd_policy.c common/usb_pd_protocol.c "
 		files="$files chip/stm32/usb_pd_phy.c "
+
+#		files="$files board/hoho/ec.tasklist "
+		files="$files board/hoho/board.c board/hoho/board.h board/hoho/gpio.inc "
+		files="$files board/hoho/usb_pd_policy.c board/hoho/usb_pd_config.h "
 
 #		files="$files board/dingdong/usb_pd_policy.c board/dingdong/usb_pd_config.h "
 
 #		files="$files board/samus_pd/board.c board/samus_pd/board.h board/samus_pd/gpio.inc board/samus_pd/ec.tasklist "
 #		files="$files board/samus_pd/usb_pd_policy.c board/samus_pd/usb_pd_config.h "
 
-		files="$files board/kronitech/board.c board/kronitech/board.h board/kronitech/gpio.inc board/kronitech/ec.tasklist "
+#		files="$files board/kronitech/ec.tasklist "
+		files="$files board/kronitech/board.c board/kronitech/board.h board/kronitech/gpio.inc "
 		files="$files board/kronitech/usb_pd_policy.c board/kronitech/usb_pd_config.h "
+		files="$files stm32f-portmap.wiki "
 
 
 	elif [ -f "$XuCat" ]; then
@@ -37,6 +42,7 @@ function files_list()
 	fi
 }
 
+mycheat=1
 wpath=`pwd`
 #tags="$wpath/__scratch__/nRF51-common.tags"
 #SRC_FOLDERS="myproj/ nrf51422/ nrf51822/"
@@ -147,6 +153,7 @@ The only different thing about this is the refs/for/master branch. This is a mag
 git commit
 git push origin HEAD:refs/for/master
 
+git push origin --delete biz/bxutest    # delete the remote branch: biz/bxutest
 
 
 -----------------------
@@ -1027,21 +1034,66 @@ cd ~/work/wifi/packages/vlc/vlc-2.0.8
 ./GVIM
 
 #============================================================================================================
+enum pd_states {
+0	PD_STATE_DISABLED,
+#ifdef CONFIG_USB_PD_DUAL_ROLE
+	PD_STATE_SUSPENDED,
+2	PD_STATE_SNK_DISCONNECTED,
+	PD_STATE_SNK_HARD_RESET_RECOVER,
+4	PD_STATE_SNK_DISCOVERY,
+	PD_STATE_SNK_REQUESTED,
+	PD_STATE_SNK_TRANSITION,
+7	PD_STATE_SNK_READY,
+	PD_STATE_SNK_DR_SWAP,
+
+9	PD_STATE_SNK_SWAP_INIT,
+	PD_STATE_SNK_SWAP_SNK_DISABLE,
+	PD_STATE_SNK_SWAP_SRC_DISABLE,
+	PD_STATE_SNK_SWAP_STANDBY,
+	PD_STATE_SNK_SWAP_COMPLETE,
+#endif /* CONFIG_USB_PD_DUAL_ROLE */
+
+14	PD_STATE_SRC_DISCONNECTED,
+	PD_STATE_SRC_HARD_RESET_RECOVER,
+16	PD_STATE_SRC_STARTUP,
+	PD_STATE_SRC_DISCOVERY,
+	PD_STATE_SRC_NEGOCIATE,
+19	PD_STATE_SRC_ACCEPTED,
+	PD_STATE_SRC_POWERED,
+	PD_STATE_SRC_TRANSITION,
+22	PD_STATE_SRC_READY,
+	PD_STATE_SRC_DR_SWAP,
+
+#ifdef CONFIG_USB_PD_DUAL_ROLE
+24	PD_STATE_SRC_SWAP_INIT,
+	PD_STATE_SRC_SWAP_SNK_DISABLE,
+	PD_STATE_SRC_SWAP_SRC_DISABLE,
+	PD_STATE_SRC_SWAP_STANDBY,
+#endif /* CONFIG_USB_PD_DUAL_ROLE */
+
+28	PD_STATE_SOFT_RESET,
+	PD_STATE_HARD_RESET_SEND,
+30	PD_STATE_HARD_RESET_EXECUTE,
+	PD_STATE_BIST,
+};
+
+
+#============================================================================================================
 my cheat sheet
 #--------------------------------------------
 SS=""; RR=""; FOLDERS="./"
 find $FOLDERS \( -name \*.[ch] -o -name \*.inc \) -exec sed -ie "s,$SS,$RR,g" {} \;  ; find $FOLDERS \( -name \*.[ch]e -o -name \*.ince \) -print -exec rm {} \;
 
-#--------------------------------------------
-ctags -R board/hoho chip/stm32 common core/cortex-m0 driver include power test util
 ctags -R board/hoho chip/stm32 common core/cortex-m0 driver include power test util board/samus_pd
 
+#--------------------------------------------
 ./chromium/tools/depot_tools/cros_sdk
-cd ~/trunk/src/platform/ec
-make clobber
-make -j BOARD=hoho
-make tests -j BOARD=hoho
-make buildall
+cd ~/trunk/src/platform/ec     make clobber       make -j BOARD=hoho
+make buildall                  make hosttests     (from trunk/src/platform/ec): ./build/host/usb_pd/usb_pd.exe
 
+> make clobber; make -j BOARD=kronitech; make -j BOARD=kronitech_emudock; make -j BOARD=kronitech_emuhost; make -j BOARD=kronitech_pwr_typc; touch build/bernard.done
+> while [ 1 ]; do if [ -f build/bernard.done ]; then rm build/bernard.done; cp -av build/kronitech_emuhost/ec.bin /tmp/ec-host.bin; cp -av build/kronitech_emudock/ec.bin /tmp/ec-dock.bin; cp -av build/kronitech/ec.bin /tmp/ec-kron1.bin; cp -av build/kronitech_pwr_typc/ec.bin /tmp/ec-kron2.bin; fi; sleep 10; done
+
+#--------------------------------------------
 evince "$HOME/Documents/08-Standards/USB3.1_081114/USB Type-C/USB Type-C Specification Release 1.0.pdf" "$HOME/Documents/08-Standards/USB3.1_081114/USB Power Delivery/USB_PD_R2_0 V1.0 - 20140807.pdf" "$HOME/Documents/08-Standards/VESA/spec/BXu-DP_Alt_Mode_on_USB_Type-C_v1.0.pdf" "$HOME/Documents/10-RD/general/2014 Q4 RD Quarterly meeting/Type-C Intro/BizLink USB Type-C Introduction, Oct 17 2014.pdf" "$HOME/Documents/10-RD/Type-C primer/solutions/STM/STM32F0xx RM.pdf" "$HOME/Documents/10-RD/Type-C primer/solutions/STM/STM32F072xx DS.pdf" "$HOME/Documents/10-RD/Type-C primer/solutions/Google/810-10116-02_20141007_hoho_SCH_0.pdf"  &
 

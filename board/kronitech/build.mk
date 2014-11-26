@@ -5,7 +5,7 @@
 #
 # Board specific files build
 
-# the IC is STmicro STM32F072VBH6
+# the IC is STmicro STM32F072B
 CHIP:=stm32
 CHIP_FAMILY:=stm32f0
 CHIP_VARIANT:=stm32f07x

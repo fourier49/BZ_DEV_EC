@@ -114,7 +114,7 @@ void vbus1_evt(enum gpio_signal signal)
 void pwr_in_event(enum gpio_signal signal)
 {
 	ccprintf("DC-IN %d, %d!\n", signal, gpio_get_level(signal));
-	task_wake(TASK_ID_PD_P1);
+	// task_wake(TASK_ID_PD_P1);
 }
 
 // must be after GPIO's signal definition

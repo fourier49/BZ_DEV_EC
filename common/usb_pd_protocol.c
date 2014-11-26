@@ -1580,6 +1580,7 @@ void pd_task(void)
 		task_wait_event(timeout);
 		/* incoming packet ? */
 		if (pd_rx_started(port) && pd_comm_enabled) {
+			CPRINTF("BXU %s:%d P:%d \n", __func__, __LINE__, port);
 			incoming_packet = 1;
 			head = analyze_rx(port, payload);
 			pd_rx_complete(port);
@@ -1608,6 +1609,7 @@ void pd_task(void)
 				pd[port].polarity =
 					GET_POLARITY(cc1_volt, cc2_volt);
 				pd_select_polarity(port, pd[port].polarity);
+				CPRINTF("ST.%d:%d cc1=%d cc2=%d pol=%d\n", port, this_state, cc1_volt, cc2_volt, pd[port].polarity); // BXU
 				/* initial data role for source is DFP */
 				pd_set_data_role(port, PD_ROLE_DFP);
 				/* Set to USB SS initially */
@@ -1902,6 +1904,7 @@ void pd_task(void)
 							     cc2_volt);
 					pd_select_polarity(port,
 							   pd[port].polarity);
+					CPRINTF("ST.%d:%d cc1=%d cc2=%d pol=%d\n", port, this_state, cc1_volt, cc2_volt, pd[port].polarity); // BXU
 					/* reset message ID  on connection */
 					pd[port].msg_id = 0;
 					/* initial data role for sink is UFP */
@@ -2481,7 +2484,7 @@ void pd_send_hpd(int port, enum hpd_event hpd)
 				0,		      /* request exit DP */
 				0,		      /* request exit USB */
 				0,		      /* MF pref */
-				gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
+				gpio_get_level(GPIO_PD_SBU_ENABLE),
 				0,		      /* power low */
 				0x2);
 	pd_send_vdm(port, USB_SID_DISPLAYPORT,

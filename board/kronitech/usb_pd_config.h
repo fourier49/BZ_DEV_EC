@@ -15,16 +15,18 @@
 /* Port and task configuration */
 #ifdef CONFIG_BIZ_DUAL_CC
 #define PD_PORT_COUNT 2
-#else
-#define PD_PORT_COUNT 1
-#endif
 #define PORT_TO_TASK_ID(port) ((port) ? TASK_ID_PD_P1 : TASK_ID_PD_P0)
 #define TASK_ID_TO_PORT(id)   ((id) == TASK_ID_PD_P0 ? 0 : 1)
+#else
+#define PD_PORT_COUNT 1
+#define PORT_TO_TASK_ID(port) TASK_ID_PD_P0
+#define TASK_ID_TO_PORT(id)   0
+#endif
 
 /* Timer selection for baseband PD communication */
-#define TIM_CLOCK_PD_TX_P0 14
+#define TIM_CLOCK_PD_TX_P0 17
 #define TIM_CLOCK_PD_RX_P0 1
-#define TIM_CLOCK_PD_TX_P1 14
+#define TIM_CLOCK_PD_TX_P1 17
 #define TIM_CLOCK_PD_RX_P1 3
 
 #define TIM_CLOCK_PD_TX(p) ((p) ? TIM_CLOCK_PD_TX_P1 : TIM_CLOCK_PD_TX_P0)
@@ -53,7 +55,7 @@
 #define CONFIG_HW_CRC
 
 /* TX uses SPI1 on PB3-4 for port P0, SPI2 on PB 13-14 for port P1 */
-#define SPI_REGS(p) ((p) ? STM32_SPI1_REGS : STM32_SPI2_REGS)
+#define SPI_REGS(p) ((p) ? STM32_SPI2_REGS : STM32_SPI1_REGS)
 static inline void spi_enable_clock(int port)
 {
 	if (port == 1)
@@ -62,8 +64,8 @@ static inline void spi_enable_clock(int port)
 		STM32_RCC_APB2ENR |= STM32_RCC_PB2_SPI1;
 }
 
-/* DMA for transmit uses DMA CH7 for C0 and DMA_CH3 for C1 */
-#define DMAC_SPI_TX(p) ((p) ? STM32_DMAC_CH3 : STM32_DMAC_CH7)
+/* DMA for transmit uses DMA CH7 for P1 and DMA_CH3 for P0 */
+#define DMAC_SPI_TX(p) ((p) ? STM32_DMAC_CH7 : STM32_DMAC_CH3)
 
 /* RX uses COMP1 and TIM1 CH1 on port C0 and COMP2 and TIM3_CH1 for port C1*/
 #define CMP1OUTSEL STM32_COMP_CMP1OUTSEL_TIM1_IC1
@@ -159,7 +161,7 @@ static inline void pd_tx_disable(int port, int polarity)
 }
 
 /* we know the plug polarity, do the right configuration */
-#ifdef __BIZ_EMU_BUILD__
+#ifndef __BIZ_EMU_BUILD__
 static inline void pd_select_polarity(int port, int polarity)
 {
 }
@@ -231,7 +233,7 @@ static inline void pd_set_host_mode(int port, int enable)
 	}
 }
 
-#ifdef __BIZ_EMU_BUILD__
+#ifndef __BIZ_EMU_BUILD__
 static inline int pd_adc_read(int port, int cc)
 {
 	return 3000;
@@ -282,7 +284,11 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_SNK_VA   200 /* mV */
 
 /* start as a sink in case we have no other power supply/battery */
+#ifdef CONFIG_BIZ_EMU_HOST
+#define PD_DEFAULT_STATE PD_STATE_SRC_DISCONNECTED
+#else
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
+#endif
 
 /* delay for the voltage transition on the power supply, chip max is 16us */
 #define PD_POWER_SUPPLY_TRANSITION_DELAY 20000 /* us */
