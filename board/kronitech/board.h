@@ -70,13 +70,13 @@
 #define CONFIG_USB_PD_ALT_MODE_DFP
 #define CONFIG_PD_USE_DAC_AS_REF
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1
-#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3000)
+#define CONFIG_PD_DAC_VOUT         (850 * 4096 / 3000)   /* STD: 550 */
 #endif
 
 #ifdef CONFIG_BIZ_EMU_DOCK
 #define CONFIG_PD_USE_DAC_AS_REF
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2
-#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3000) << 16
+#define CONFIG_PD_DAC_VOUT         (850 * 4096 / 3000) << 16   /* STD: 550 */
 #endif
 
 /* I2C ports configuration */

@@ -86,19 +86,19 @@ static inline void spi_enable_clock(int port)
 static inline void pd_set_pins_speed(int port)
 {
 	if (port == 1) {
-		/* 40 MHz pin speed on SPI PB13/14 */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x3C000000;
-		/* 40 MHz pin speed on TIM14_CH1 (PB1) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x0000000C;
-		/* 40 Mhz pin speed on TX_EN (PB9) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x000C0000;
+		/* 40 MHz pin speed on SPI PB13/14  -->  10MHz */
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x14000000; // 0x3C000000;
+		/* 40 MHz pin speed on TIM17_CH1 (PB9) */
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
+		/* 40 Mhz pin speed on TX_EN (PB1) */
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000004; // 0x0000000C;
 	} else {
 		/* 40 MHz pin speed on SPI PB3/4 */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x000003C0;
-		/* 40 MHz pin speed on TIM14_CH1 (PB1) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x0000000C;
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000140; // 0x000003C0;
+		/* 40 MHz pin speed on TIM17_CH1 (PB9) */
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
 		/* 40 Mhz pin speed on TX_EN (PB0) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000003;
+		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000001; // 0x00000003;
 	}
 }
 
@@ -126,6 +126,7 @@ static inline void pd_tx_enable(int port, int polarity)
 
 		/* set the low level reference */
 		gpio_set_level(GPIO_USB_P0_CC_TX_EN, 1);
+#ifdef CONFIG_BIZ_DUAL_CC
 	} else {
 		/* put SPI function on TX pin */
 		/* PB14 is SPI2 MISO */
@@ -133,6 +134,7 @@ static inline void pd_tx_enable(int port, int polarity)
 
 		/* set the low level reference */
 		gpio_set_level(GPIO_USB_P1_CC_TX_EN, 1);
+#endif
 	}
 }
 
@@ -148,6 +150,7 @@ static inline void pd_tx_disable(int port, int polarity)
 
 		/* put the low level reference in Hi-Z */
 		gpio_set_level(GPIO_USB_P0_CC_TX_EN, 0);
+#ifdef CONFIG_BIZ_DUAL_CC
 	} else {
 		/* output low on SPI TX to disable the FET */
 		/* PB14 is SPI2 MISO */
@@ -157,15 +160,11 @@ static inline void pd_tx_disable(int port, int polarity)
 
 		/* put the low level reference in Hi-Z */
 		gpio_set_level(GPIO_USB_P1_CC_TX_EN, 0);
+#endif
 	}
 }
 
 /* we know the plug polarity, do the right configuration */
-#ifndef __BIZ_EMU_BUILD__
-static inline void pd_select_polarity(int port, int polarity)
-{
-}
-#else
 static inline void pd_select_polarity(int port, int polarity)
 {
 	uint32_t val = STM32_COMP_CSR;
@@ -185,7 +184,6 @@ static inline void pd_select_polarity(int port, int polarity)
 					   : STM32_COMP_CMP2INSEL_INM6); // pa2
 	}
 }
-#endif
 
 /* Initialize pins used for TX and put them in Hi-Z */
 static inline void pd_tx_init(void)
@@ -213,6 +211,7 @@ static inline void pd_set_host_mode(int port, int enable)
 
 			/* Let charge_manager decide to enable the port */
 		}
+#ifdef CONFIG_BIZ_DUAL_CC
 	} else {
 		if (enable) {
 			/* We never charging in power source mode */
@@ -230,27 +229,21 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P1_CC2_ODL, 0);
 			/* Let charge_manager decide to enable the port */
 		}
+#endif
 	}
 }
 
-#ifndef __BIZ_EMU_BUILD__
 static inline int pd_adc_read(int port, int cc)
 {
-	return 3000;
-}
-#else
-static inline int pd_adc_read(int port, int cc)
-{
-#ifdef CONFIG_BIZ_DUAL_CC
 	if (port == 0)
-		return adc_read_channel(ADC_P0_CC_PD);
+#ifdef CONFIG_BIZ_EMU_HOST
+		return 3000;
+#else
+		return cc ? 0 : adc_read_channel(ADC_P0_CC_PD);
+#endif
 	else
 		return adc_read_channel(cc ? ADC_P1_CC2_PD : ADC_P1_CC1_PD);
-#else
-	return adc_read_channel(ADC_P0_CC_PD);
-#endif
 }
-#endif
 
 static inline void pd_set_vconn(int port, int polarity, int enable)
 {
@@ -267,13 +260,17 @@ static inline void pd_set_vconn(int port, int polarity, int enable)
 
 static inline int pd_snk_is_vbus_provided(int port)
 {
-#if 0
+#ifdef __BIZ_EMU_BUILD__
+	return 1;
+#else
+#ifdef CONFIG_BIZ_DUAL_CC
 	return gpio_get_level(port ? GPIO_USB_P1_VBUS_WAKE :
 				     GPIO_USB_P0_VBUS_WAKE);
 #else
 	if (port == 0)
 		return gpio_get_level(GPIO_USB_P0_VBUS_WAKE);
 	return 1;
+#endif
 #endif
 }
 

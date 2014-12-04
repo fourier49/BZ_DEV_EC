@@ -10,21 +10,23 @@
 //    port 0: UFP / plug
 //    port 1: DFP / receptacle
 //-------------------------------------------------------------------------------------
-/* CC Signal RX */
+/* CC Signal RX/TX Port 0 */
 GPIO(USB_P0_CC_PD,           A, 0,  GPIO_ANALOG,   NULL)
-GPIO(USB_P1_CC1_PD,          A, 2,  GPIO_ANALOG,   NULL)
-GPIO(USB_P1_CC2_PD,          A, 5,  GPIO_ANALOG,   NULL)
+GPIO(USB_P0_CC_TX_DATA,      B, 4,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P0_CC_TX_EN,        B, 0,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_CCRX_REF,           A, 1,  GPIO_ANALOG,   NULL)
 GPIO(USB_CCRX_REF_OUT,       A, 4,  GPIO_ANALOG,   NULL)
 
-/* CC Signal TX */
-GPIO(USB_P0_CC_TX_DATA,      B, 4,  GPIO_OUT_LOW,  NULL)
+/* CC Signal RX/TX Port 1 */
+#ifdef CONFIG_BIZ_DUAL_CC
+GPIO(USB_P1_CC1_PD,          A, 2,  GPIO_ANALOG,   NULL)
+GPIO(USB_P1_CC2_PD,          A, 5,  GPIO_ANALOG,   NULL)
 GPIO(USB_P1_CC_TX_DATA,      B, 14, GPIO_OUT_LOW,  NULL)
-GPIO(USB_P0_CC_TX_EN,        B, 0,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_P1_CC_TX_EN,        B, 1,  GPIO_OUT_LOW,  NULL)
 
 /* USB CC1/CC2 Polarity (orientation) */
 GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW,  NULL)
+#endif
 
 //-------------------------------------------------------------------------------------
 // CC Port 0
@@ -55,12 +57,12 @@ GPIO(USB_P1_DP_HPD,          C, 1,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_P1_SBU_ENABLE,      C, 2,  GPIO_OUT_LOW,  NULL)
 
 /* DFP VBUS/VCONN signals */
-GPIO(USB_P1_CC1_VCONN_EN_L,  C, 3,  GPIO_OUT_LOW,  NULL)
-GPIO(USB_P1_CC2_VCONN_EN_L,  C, 4,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P1_CC1_VCONN_EN_L,  C, 3,  GPIO_OUT_HIGH,  NULL)
+GPIO(USB_P1_CC2_VCONN_EN_L,  C, 4,  GPIO_OUT_HIGH,  NULL)
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P1_CC1_PWROLE_SRC,  C, 5, GPIO_ODR_LOW,  NULL)
-GPIO(USB_P1_CC2_PWROLE_SRC,  C, 6, GPIO_ODR_LOW,  NULL)
+GPIO(USB_P1_CC1_PWROLE_SRC,  C, 5, GPIO_ODR_HIGH,  NULL)
+GPIO(USB_P1_CC2_PWROLE_SRC,  C, 6, GPIO_ODR_HIGH,  NULL)
 
 /* DFP Power Provider */   
 GPIO(USB_P1_PWR_5V_EN,       C, 7,  GPIO_OUT_HIGH, NULL)
@@ -77,7 +79,7 @@ GPIO(MCU_CHIPS_RESET_EN,     B, 11, GPIO_OUT_LOW,  NULL)
 GPIO(MCU_PWR_DC_IN_DET,      B, 5,  GPIO_INT_BOTH, pwr_in_event)
 GPIO(MCU_PWR_STDBY_HUB,      A, 7,  GPIO_OUT_HIGH, NULL)
 GPIO(MCU_PWR_STDBY_LAN,      B, 6,  GPIO_OUT_HIGH, NULL)
-GPIO(MCU_PWR_STDBY_DP,       B, 9,  GPIO_OUT_HIGH, NULL)
+GPIO(MCU_PWR_STDBY_DP,       B, 1,  GPIO_OUT_HIGH, NULL)
 
 #if 0
 /*

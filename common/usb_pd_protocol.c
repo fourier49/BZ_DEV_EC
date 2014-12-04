@@ -37,7 +37,7 @@
  * Note that higher log level causes timing changes and thus may affect
  * performance.
  */
-static int debug_level;
+static int debug_level = 1;
 #else
 #define CPRINTF(format, args...)
 const int debug_level;
@@ -179,10 +179,18 @@ static const uint8_t dec4b5b[] = {
 #define PD_CAPS_COUNT 50
 
 /* Port role at startup */
+#if 0
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 #define PD_ROLE_DEFAULT PD_ROLE_SINK
 #else
 #define PD_ROLE_DEFAULT PD_ROLE_SOURCE
+#endif
+#else
+#ifdef CONFIG_BIZ_EMU_HOST
+#define PD_ROLE_DEFAULT PD_ROLE_SOURCE
+#else
+#define PD_ROLE_DEFAULT PD_ROLE_SINK
+#endif
 #endif
 
 enum vdm_states {
@@ -864,6 +872,7 @@ static void handle_data_request(int port, uint16_t head,
 	int type = PD_HEADER_TYPE(head);
 	int cnt = PD_HEADER_CNT(head);
 
+	CPRINTF("BXU %s:%d P:%d Typ:%d, Cnt:%d \n", __func__, __LINE__, port, type, cnt);
 	switch (type) {
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 	case PD_DATA_SOURCE_CAP:
@@ -1580,14 +1589,17 @@ void pd_task(void)
 		task_wait_event(timeout);
 		/* incoming packet ? */
 		if (pd_rx_started(port) && pd_comm_enabled) {
-			CPRINTF("BXU %s:%d P:%d \n", __func__, __LINE__, port);
 			incoming_packet = 1;
 			head = analyze_rx(port, payload);
 			pd_rx_complete(port);
-			if (head > 0)
+			if (head > 0) {
+				CPRINTF("BXU %s:%d P:%d st:%d Hd:%x \n", __func__, __LINE__, port, pd[port].task_state, head);
 				handle_request(port,  head, payload);
-			else if (head == PD_ERR_HARD_RESET)
+			}
+			else if (head == PD_ERR_HARD_RESET) {
+				CPRINTF("BXU %s:%d P:%d st:%d \n", __func__, __LINE__, port, pd[port].task_state);
 				execute_hard_reset(port);
+			}
 		} else {
 			incoming_packet = 0;
 		}
