@@ -265,6 +265,7 @@ The portmap defined here is BizLink's dual CC design:
 * Misc signals
 |_.Name |_.Port |_.Type |_.Description|
 | MCU_CHIPS_RESET_EN | _any_ | GPIO_OUT_HIGH | reset of any chips which may be impacted by DP Alt Mode entering/exiting |
+| MCU_DBG_TRIGGER | _any_ | GPIO_OUT_LOW | generate a trigger pulse signal for Scope capture of waveforms |
 
 
 - - -
@@ -339,5 +340,6 @@ The portmap defined here is BizLink's dual CC design:
 * Misc signals
 |_.Name |_.Port |_.Type |_.Description|
 | MCU_CHIPS_RESET_EN | _any_ | GPIO_OUT_HIGH | reset of any chips which may be impacted by DP Alt Mode entering/exiting |
+| MCU_DBG_TRIGGER | _any_ | GPIO_OUT_LOW | generate a trigger pulse signal for Scope capture of waveforms |
 
 
