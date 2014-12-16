@@ -66,17 +66,25 @@
 #define CONFIG_USBC_SS_MUX
 #undef  CONFIG_WATCHDOG_HELP
 
+/*
+ * DFP advised power (Type-C spec: Table 4-18 ~ 4-20)
+ *-----------------------------------------------------
+#define CONFIG_USB_PD_ADVPWR_DEFAULT    // Default USB Power
+#define CONFIG_USB_PD_ADVPWR_1A5
+ */
+#define CONFIG_USB_PD_ADVPWR_3A
+
 #ifdef CONFIG_BIZ_EMU_HOST
 #define CONFIG_USB_PD_ALT_MODE_DFP
 #define CONFIG_PD_USE_DAC_AS_REF
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1
-#define CONFIG_PD_DAC_VOUT         (850 * 4096 / 3000)   /* STD: 550 */
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300)   /* STD: 550 */
 #endif
 
 #ifdef CONFIG_BIZ_EMU_DOCK
 #define CONFIG_PD_USE_DAC_AS_REF
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2
-#define CONFIG_PD_DAC_VOUT         (850 * 4096 / 3000) << 16   /* STD: 550 */
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300) << 16   /* STD: 550 */
 #endif
 
 /* I2C ports configuration */

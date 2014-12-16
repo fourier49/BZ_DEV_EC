@@ -274,8 +274,19 @@ static inline int pd_snk_is_vbus_provided(int port)
 #endif
 }
 
-/* Standard-current DFP : no-connect voltage is 1.55V */
-#define PD_SRC_VNC 1550 /* mV */
+/* PD_SRC_VNC: Standard-current DFP : no-connect voltage is 1.55V */
+#ifdef CONFIG_USB_PD_ADVPWR_1A5
+#define PD_SRC_RD_THRESHOLD  400  /* mV */
+#define PD_SRC_VNC           1600 /* mV */
+#endif
+#ifdef CONFIG_USB_PD_ADVPWR_3A
+#define PD_SRC_RD_THRESHOLD  800  /* mV */
+#define PD_SRC_VNC           2600 /* mV */
+#endif
+#ifdef CONFIG_USB_PD_ADVPWR_DEFAULT
+#define PD_SRC_RD_THRESHOLD  200  /* mV */
+#define PD_SRC_VNC           1600 /* mV */
+#endif
 
 /* UFP-side : threshold for DFP connection detection */
 #define PD_SNK_VA   200 /* mV */
