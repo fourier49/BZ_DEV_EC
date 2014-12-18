@@ -129,11 +129,6 @@ int pd_choose_voltage(int cnt, uint32_t *src_caps, uint32_t *rdo,
 					supply_voltage, 0);
 }
 
-void pd_set_max_voltage(unsigned mv)
-{
-	max_mv = mv;
-}
-
 int pd_check_requested_voltage(uint32_t rdo)
 {
 	int max_ma = rdo & 0x3FF;
