@@ -329,7 +329,7 @@ void board_set_usb_mux(int port, enum typec_mux mux, int polarity)
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 
 	/* reset everything */
-	gpio_set_level(usb_mux->dp_mode_l,    1);   // default: disable DP AUX
+	gpio_set_level(usb_mux->dp_mode_l,    0);   // default: disable DP AUX
 	gpio_set_level(usb_mux->dp_2_4_lanes, 0);   // default: 2 lanes mode
 
 	if (mux == TYPEC_MUX_NONE)
@@ -353,9 +353,11 @@ void board_set_usb_mux(int port, enum typec_mux mux, int polarity)
 	gpio_set_level(usb_mux->ss2_en_l, 0);
 #else
 	if (mux == TYPEC_MUX_DP || mux == TYPEC_MUX_DOCK) {
-		gpio_set_level(usb_mux->dp_mode_l, 0);
+		gpio_set_level(usb_mux->dp_mode_l, 1);  // enable DP AUX
 	}
-
+	if (mux == TYPEC_MUX_DP) {
+		gpio_set_level(usb_mux->dp_2_4_lanes, 1);  // 4 lanes
+	}
 #endif
 }
 
