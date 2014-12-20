@@ -267,12 +267,18 @@ static inline int pd_snk_is_vbus_provided(int port)
 	return gpio_get_level(port ? GPIO_USB_P1_VBUS_WAKE :
 				     GPIO_USB_P0_VBUS_WAKE);
 #else
+	/*
 	if (port == 0)
 		return gpio_get_level(GPIO_USB_P0_VBUS_WAKE);
+	*/
 	return 1;
 #endif
 #endif
 }
+
+/* start as a sink in case we have no other power supply/battery */
+#ifdef CONFIG_BIZ_EMU_HOST
+#define PD_DEFAULT_STATE PD_STATE_SRC_DISCONNECTED
 
 /* PD_SRC_VNC: Standard-current DFP : no-connect voltage is 1.55V */
 #ifdef CONFIG_USB_PD_ADVPWR_1A5
@@ -289,13 +295,17 @@ static inline int pd_snk_is_vbus_provided(int port)
 #endif
 
 /* UFP-side : threshold for DFP connection detection */
-#define PD_SNK_VA   200 /* mV */
+#define PD_SNK_VA            200 /* mV */
 
-/* start as a sink in case we have no other power supply/battery */
-#ifdef CONFIG_BIZ_EMU_HOST
-#define PD_DEFAULT_STATE PD_STATE_SRC_DISCONNECTED
 #else
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
+
+/* 3.0A DFP : no-connect voltage is 2.45V */
+#define PD_SRC_VNC           2450 /* mV */
+#define PD_SRC_RD_THRESHOLD  200  /* mV */
+
+/* UFP-side : threshold for DFP connection detection */
+#define PD_SNK_VA            250 /* mV */
 #endif
 
 /* delay for the voltage transition on the power supply, chip max is 16us */

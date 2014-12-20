@@ -74,16 +74,13 @@
  */
 #define CONFIG_USB_PD_ADVPWR_3A
 
-#ifdef CONFIG_BIZ_EMU_HOST
 #define CONFIG_PD_USE_DAC_AS_REF
-#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1
-#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300)   /* STD: 550 */
-#endif
-
 #ifdef CONFIG_BIZ_EMU_DOCK
-#define CONFIG_PD_USE_DAC_AS_REF
-#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2      /* DAC_OUT2 PA5 */
 #define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300) << 16   /* STD: 550 */
+#else
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1      /* DAC_OUT1 PA4 */
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300)   /* STD: 550 */
 #endif
 
 /* I2C ports configuration */
