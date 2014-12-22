@@ -1539,6 +1539,9 @@ void pd_task(void)
 
 	/* Initialize PD protocol state variables for each port. */
 	pd[port].power_role = PD_ROLE_DEFAULT;
+#ifdef CONFIG_BIZ_EMU_HOST
+	drp_state = PD_DRP_FORCE_SOURCE;
+#endif
 	pd_set_data_role(port, PD_ROLE_DEFAULT);
 	pd[port].vdm_state = VDM_STATE_DONE;
 	pd[port].flags = 0;
@@ -2790,6 +2793,63 @@ static int command_typec(int argc, char **argv)
 DECLARE_CONSOLE_COMMAND(typec, command_typec,
 			"<port> [none|usb|dp|dock]",
 			"Control type-C connector muxing",
+			NULL);
+#endif /* CONFIG_USBC_SS_MUX */
+
+#ifdef CONFIG_BIZ_EMU_HOST
+static int command_amode(int argc, char **argv)
+{
+	const char * const cmd_name[] = {"enter", "exit", "2", "4"};
+	char *e;
+	uint32_t data[2];
+	int port;
+	int cmd = -1;
+	int i;
+
+	if (argc < 2)
+		return EC_ERROR_PARAM_COUNT;
+
+	port = strtoi(argv[1], &e, 10);
+	if (*e || port >= PD_PORT_COUNT)
+		return EC_ERROR_PARAM1;
+
+	if (argc < 3) {
+		ccprintf("Port C%d: CC1 %d mV  CC2 %d mV (polarity:CC%d)\n",
+			port, pd_adc_read(port, 0), pd_adc_read(port, 1),
+			pd_get_polarity(port) + 1);
+		return EC_SUCCESS;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(cmd_name); i++)
+		if (!strcasecmp(argv[2], cmd_name[i]))
+			cmd = i;
+
+	switch(cmd) {
+	case 0: // ENTER Mode
+		break;
+	case 1: // EXIT  Mode
+		break;
+	case 2: // Config 2 lanes Mode
+	case 3: // Config 4 lanes Mode
+		data[0] = VDO_DP_CFG(
+				(cmd==3)? MODE_DP_PIN_C : MODE_DP_PIN_D, /* sink pins */
+				(cmd==3)? MODE_DP_PIN_C : MODE_DP_PIN_D, /* src pins */
+				1,             /* DPv1.3 signaling */
+				2);            /* UFP connected */
+		pd_send_vdm(port, USB_SID_DISPLAYPORT,
+			CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port)), data, 1);
+		board_set_usb_mux(port, (cmd==3)? TYPEC_MUX_DP : TYPEC_MUX_DOCK,
+			pd_get_polarity(port));
+		break;
+	default:
+		return EC_ERROR_UNIMPLEMENTED;
+	}
+
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(amode, command_amode,
+			"<port> [enter|exit|2|4]",
+			"Control type-C DP Alt Mode Configuration",
 			NULL);
 #endif /* CONFIG_USBC_SS_MUX */
 

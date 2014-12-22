@@ -239,6 +239,10 @@ void pd_new_contract(int port, int pr_role, int dr_role,
 
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 //==============================================================================
+#ifdef __NEVER_USED__
+static void ___CONFIG_DFP__(void) {}
+#endif
+
 const struct svdm_response svdm_rsp = {
 	.identity = NULL,
 	.svids = NULL,
@@ -392,6 +396,10 @@ const int supported_modes_cnt = ARRAY_SIZE(supported_modes);
 
 #else  // CONFIG_USB_PD_ALT_MODE_DFP
 //==============================================================================
+#ifdef __NEVER_USED__
+static void ___CONFIG_UFP__(void) {}
+#endif
+
 const uint32_t vdo_idh = VDO_IDH(0, /* data caps as USB host */
 				 1, /* data caps as USB device */
 				 IDH_PTYPE_AMA, /* Alternate mode */
@@ -435,9 +443,10 @@ static int svdm_response_svids(int port, uint32_t *payload)
 #define OPOS 1
 
 const uint32_t vdo_dp_mode[MODE_CNT] =  {
-	VDO_MODE_DP(MODE_DP_PIN_C, /* UFP pin cfg supported */
+	VDO_MODE_DP(MODE_DP_PIN_C  /* UFP pin cfg supported */
+		  | MODE_DP_PIN_D,
 		    0,		   /* DFP pin cfg supported : none */
-		    1,		   /* no usb2.0	signalling in AMode */
+		    0,		   /* with usb2.0 signalling in AMode */
 		    CABLE_PLUG,	   /* its a plug */
 		    MODE_DP_V13,   /* DPv1.3 Support, no Gen2 */
 		    MODE_DP_SNK)   /* Its a sink only */
@@ -470,10 +479,52 @@ static int dp_status(int port, uint32_t *payload)
 	return 2;
 }
 
+extern void hpd_irq_deferred(void);
+extern void hpd_lvl_deferred(void);
+static void dp_switch_4L_2L(void)
+{
+	// enable DP AUX
+	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+
+	// send RESET pulse to external peripherals
+	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
+	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  1);
+
+	usleep(300);
+	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
+
+	usleep(300);
+	hpd_irq_deferred();
+
+	usleep(300);
+	hpd_lvl_deferred();
+}
+DECLARE_DEFERRED(dp_switch_4L_2L);
+
 static int dp_config(int port, uint32_t *payload)
 {
-	if (PD_DP_CFG_DPON(payload[1]))
-		gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+	if (port != 0) return 0;
+
+	if (!PD_DP_CFG_DPON(payload[1])) {
+		gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 0);  // disable DP AUX
+		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
+		return 1;
+	}
+
+	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
+
+	// send RESET pulse to external peripherals
+	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
+	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
+
+	// DP 4 lanes / 2 lanes switch
+	if (PD_VDO_AMA_SNK_PINS(payload[1]) & MODE_DP_PIN_C)
+		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 1);  // 4 lanes
+	else
+	if (PD_VDO_AMA_SNK_PINS(payload[1]) & MODE_DP_PIN_D)
+		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
+
+	hook_call_deferred(dp_switch_4L_2L, 20 * MSEC);
 	return 1;
 }
 

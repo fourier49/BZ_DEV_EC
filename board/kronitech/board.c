@@ -382,7 +382,22 @@ int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 
 	return has_ss;
 #else
-	return 0;
+	const struct usb_port_mux *usb_mux = usb_muxes + port;
+	int has_usb, has_dp;
+
+	has_usb = !gpio_get_level(usb_mux->dp_2_4_lanes);
+	has_dp  = gpio_get_level(usb_mux->dp_mode_l);
+
+	if (has_usb) {
+		*usb_str = "USB3";
+		*dp_str = has_dp ? "2DP" : NULL;
+	}
+	else {
+		*usb_str = "USB2";
+		*dp_str = has_dp ? "4DP" : NULL;
+	}
+
+	return 1;
 #endif
 }
 

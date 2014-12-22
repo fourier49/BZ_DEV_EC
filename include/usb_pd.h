@@ -465,6 +465,9 @@ struct pd_policy {
 #define MODE_DP_SRC  0x2
 #define MODE_DP_BOTH 0x3
 
+#define PD_VDO_AMA_SNK_PINS(mode)       (((mode) >> 16) & 0xff)
+#define PD_VDO_AMA_SRC_PINS(mode)       (((mode) >> 8)  & 0xff)
+
 /*
  * DisplayPort Status VDO
  * ----------------------
