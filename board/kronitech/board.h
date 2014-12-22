@@ -35,6 +35,10 @@
 
 #define GPIO_PD_SBU_ENABLE     GPIO_USB_P0_SBU_ENABLE   /* get same SBU_ENABLE gpio name as HOHO */
 
+#ifdef CONFIG_BIZ_EMU_HOST
+#define __BIZ_SPICLK_USE_PB9__
+#endif
+
 /*==============================================================================*/
 /* 48 MHz SYSCLK clock frequency */
 #define CPU_CLOCK 48000000

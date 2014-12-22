@@ -24,9 +24,14 @@
 #endif
 
 /* Timer selection for baseband PD communication */
+#ifdef __BIZ_SPICLK_USE_PB9__
 #define TIM_CLOCK_PD_TX_P0 17
-#define TIM_CLOCK_PD_RX_P0 1
 #define TIM_CLOCK_PD_TX_P1 17
+#else
+#define TIM_CLOCK_PD_TX_P0 14
+#define TIM_CLOCK_PD_TX_P1 14
+#endif
+#define TIM_CLOCK_PD_RX_P0 1
 #define TIM_CLOCK_PD_RX_P1 3
 
 #define TIM_CLOCK_PD_TX(p) ((p) ? TIM_CLOCK_PD_TX_P1 : TIM_CLOCK_PD_TX_P0)
@@ -88,18 +93,22 @@ static inline void pd_set_pins_speed(int port)
 	if (port == 1) {
 		/* 40 MHz pin speed on SPI PB13/14  -->  10MHz */
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x14000000; // 0x3C000000;
-		/* 40 MHz pin speed on TIM17_CH1 (PB9) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
-		/* 40 Mhz pin speed on TX_EN (PB1) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000004; // 0x0000000C;
+		/* 40 Mhz pin speed on TX_EN (PC12) */
+		STM32_GPIO_OSPEEDR(GPIO_C) |= 0x01000000; // 0x03000000;
 	} else {
 		/* 40 MHz pin speed on SPI PB3/4 */
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000140; // 0x000003C0;
-		/* 40 MHz pin speed on TIM17_CH1 (PB9) */
-		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
 		/* 40 Mhz pin speed on TX_EN (PB0) */
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000001; // 0x00000003;
 	}
+
+#ifdef __BIZ_SPICLK_USE_PB9__
+	/* 40 MHz pin speed on TIM17_CH1 (PB9) */
+	STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
+#else
+	/* 40 MHz pin speed on TIM14_CH1 (PB1) */
+	STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000004; // 0x0000000C;
+#endif
 }
 
 /* Reset SPI peripheral used for TX */

@@ -213,9 +213,9 @@ The portmap defined here is BizLink's dual CC design:
 
 * CC signal TX, Port 0
 | USB_P0_CC_TX_DATA | PB4 | GPIO_OUT_LOW |  CC TX, SPI1 MISO => demux(CC1/CC2, P0_polarity)  |
-| USB_P0_SPI1_SCK | PB3 | | CC TX, SPI1 CLK, PB9 / PB13 / PB3 connected together |
+| USB_P0_SPI1_SCK | PB3 | | CC TX, SPI1 CLK, PB1 / PB13 / PB3 connected together |
 | USB_P0_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 0 CC TX |
-| USB_CCTX_SPICLK_SRC | PB9 | | CC TX, TIM17 CH1 source to drive SPI CLK, PB9 / PB13 / PB3 connected together |
+| USB_CCTX_SPICLK_SRC | PB1 | | CC TX, TIM14 CH1 source to drive SPI CLK, PB1 / PB13 / PB3 connected together |
 
 
 * CC signal TX, Port 1
@@ -291,13 +291,13 @@ The portmap defined here is BizLink's dual CC design:
 | USB_P0_CC_TX_DATA | PB4 | GPIO_OUT_LOW |  CC TX, SPI1 MISO |
 | USB_P0_SPI1_SCK | PB3 | | CC TX, SPI1 CLK, PB1 / PB13 / PB3 connected together |
 | USB_P0_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 0 CC TX |
-| USB_CCTX_SPICLK_SRC | PB9 | | CC TX, TIM17 CH1 source to drive SPI CLK, PB9 / PB13 / PB3 connected together |
+| USB_CCTX_SPICLK_SRC | PB1 | | CC TX, TIM14 CH1 source to drive SPI CLK, PB1 / PB13 / PB3 connected together |
 
 
 * CC signal TX, Port 1
 |_.Name |_.Port |_.Type |_.Description|
 | USB_P1_CC_TX_DATA | PB14 | GPIO_OUT_LOW |  CC TX, SPI2 MISO => demux(CC1/CC2, P1_polarity) |
-| USB_P1_SPI2_SCK | PB13 | | CC TX, SPI2 CLK, PB9 / PB13 / PB3 connected together |
+| USB_P1_SPI2_SCK | PB13 | | CC TX, SPI2 CLK, PB1 / PB13 / PB3 connected together |
 | USB_P1_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 1 CC TX |
 
 
