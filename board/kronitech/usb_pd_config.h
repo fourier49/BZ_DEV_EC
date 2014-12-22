@@ -137,6 +137,9 @@ static inline void pd_tx_enable(int port, int polarity)
 		gpio_set_level(GPIO_USB_P0_CC_TX_EN, 1);
 #ifdef CONFIG_BIZ_DUAL_CC
 	} else {
+		/* set the CC1/CC2 orientation */
+		gpio_set_level(GPIO_USB_P1_CC_POLARITY, polarity);
+
 		/* put SPI function on TX pin */
 		/* PB14 is SPI2 MISO */
 		gpio_set_alternate_function(GPIO_B, 0x4000, 0);
