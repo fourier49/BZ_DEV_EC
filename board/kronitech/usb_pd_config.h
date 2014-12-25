@@ -93,8 +93,8 @@ static inline void pd_set_pins_speed(int port)
 	if (port == 1) {
 		/* 40 MHz pin speed on SPI PB13/14  -->  10MHz */
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x14000000; // 0x3C000000;
-		/* 40 Mhz pin speed on TX_EN (PC12) */
-		STM32_GPIO_OSPEEDR(GPIO_C) |= 0x01000000; // 0x03000000;
+		/* 40 Mhz pin speed on TX_EN (PA7) */
+		STM32_GPIO_OSPEEDR(GPIO_A) |= 0x00004000; // 0x0000C000;
 	} else {
 		/* 40 MHz pin speed on SPI PB3/4 */
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000140; // 0x000003C0;

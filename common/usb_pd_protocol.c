@@ -872,7 +872,6 @@ static void handle_data_request(int port, uint16_t head,
 	int type = PD_HEADER_TYPE(head);
 	int cnt = PD_HEADER_CNT(head);
 
-	CPRINTF("BXU %s:%d P:%d Typ:%d, Cnt:%d \n", __func__, __LINE__, port, type, cnt);
 	switch (type) {
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 	case PD_DATA_SOURCE_CAP:
@@ -1595,14 +1594,10 @@ void pd_task(void)
 			incoming_packet = 1;
 			head = analyze_rx(port, payload);
 			pd_rx_complete(port);
-			if (head > 0) {
-				CPRINTF("BXU %s:%d P:%d st:%d Hd:%x \n", __func__, __LINE__, port, pd[port].task_state, head);
+			if (head > 0)
 				handle_request(port,  head, payload);
-			}
-			else if (head == PD_ERR_HARD_RESET) {
-				CPRINTF("BXU %s:%d P:%d st:%d \n", __func__, __LINE__, port, pd[port].task_state);
+			else if (head == PD_ERR_HARD_RESET)
 				execute_hard_reset(port);
-			}
 		} else {
 			incoming_packet = 0;
 		}
