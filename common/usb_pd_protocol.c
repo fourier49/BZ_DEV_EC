@@ -1552,6 +1552,11 @@ void pd_task(void)
 	/* Initialize physical layer */
 	pd_hw_init(port);
 
+#ifdef CONFIG_BIZ_EMU_HOST
+        gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 1);
+        gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 1);
+#endif
+
 	while (1) {
 		/* process VDM messages last */
 		pd_vdm_send_state_machine(port);

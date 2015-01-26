@@ -39,7 +39,7 @@ GPIO(USB_P0_DP_HPD,          A, 3,  GPIO_INT_BOTH, hpd_event)
 #endif
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_ODR_LOW,  NULL)
+GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW,  NULL)
 GPIO(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
 
 /* UFP Power Provider */    
@@ -61,13 +61,13 @@ GPIO(USB_P1_CC1_VCONN_EN_L,  B, 10, GPIO_OUT_HIGH,  NULL)
 GPIO(USB_P1_CC2_VCONN_EN_L,  B, 5,  GPIO_OUT_HIGH,  NULL)
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_ODR_HIGH,  NULL)
-GPIO(USB_P1_CC2_PWROLE_SRC,  A, 6,  GPIO_ODR_HIGH,  NULL)
+GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_OUT_HIGH,  NULL)
+GPIO(USB_P1_CC2_PWROLE_SRC,  A, 6,  GPIO_OUT_HIGH,  NULL)
 
 /* DFP Power Provider */   
-GPIO(USB_P1_PWR_5V_EN,       B, 6,  GPIO_OUT_HIGH, NULL)
-GPIO(USB_P1_PWR_20V_EN,      B, 7,  GPIO_OUT_HIGH, NULL)
-GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)
+GPIO(USB_P1_PWR_5V_EN,       B, 7,  GPIO_OUT_HIGH,  NULL)   /* DFP providing 5V  over VBUS to UFP, active HIGH */
+GPIO(USB_P1_PWR_20V_EN,      B, 6,  GPIO_OUT_LOW,  NULL)    /* DFP providing 20V over VBUS to UFP, active HIGH */
+GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW,  NULL)    /* DFP get power from VBUS by UFP,     active HIGH */
 #endif
 
 #ifdef CONFIG_BIZ_DUAL_CC

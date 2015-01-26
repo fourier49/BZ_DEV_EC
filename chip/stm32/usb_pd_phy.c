@@ -351,9 +351,11 @@ int pd_start_tx(int port, int polarity, int bit_len)
 	return bit_len;
 }
 
+#define __BIZ_DEAD_LOCK_COUNT__  1000000
 void pd_tx_done(int port, int polarity)
 {
 	stm32_spi_regs_t *spi = SPI_REGS(port);
+	int i, j;
 
 	/* wait for DMA */
 #ifdef CONFIG_COMMON_RUNTIME
@@ -363,7 +365,7 @@ void pd_tx_done(int port, int polarity)
 
 	/* wait for real end of transmission */
 #if defined(CHIP_FAMILY_STM32F0) || defined(CHIP_FAMILY_STM32F3)
-	while (spi->sr & STM32_SPI_SR_FTLVL)
+	i=0; while ((spi->sr & STM32_SPI_SR_FTLVL) && (i++ < __BIZ_DEAD_LOCK_COUNT__))
 		; /* wait for TX FIFO empty */
 #else
 	while (!(spi->sr & STM32_SPI_SR_TXE))
@@ -385,12 +387,15 @@ void pd_tx_done(int port, int polarity)
 #ifndef CONFIG_USB_PD_TX_USES_SPI_MASTER
 	/* ensure that we are not pushing out junk */
 	*(uint8_t *)&spi->dr = 0;
-	while (spi->sr & STM32_SPI_SR_FTLVL)
+	j=0; while ((spi->sr & STM32_SPI_SR_FTLVL) && (j++ < __BIZ_DEAD_LOCK_COUNT__))
 		; /* wait for TX FIFO empty */
 #else
 	while (spi->sr & STM32_SPI_SR_BSY)
 		; /* wait for BSY == 0 */
 #endif
+	if (i > __BIZ_DEAD_LOCK_COUNT__/10 || j > __BIZ_DEAD_LOCK_COUNT__/10) {
+		CPRINTF("ERR TX %d %d\n", i, j);
+	}
 
 	/* put TX pins and reference in Hi-Z */
 	pd_tx_disable(port, polarity);
