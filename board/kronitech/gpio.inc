@@ -57,8 +57,8 @@ GPIO(USB_P1_DP_HPD,          B, 0,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_P1_SBU_ENABLE,      B, 2,  GPIO_OUT_LOW,  NULL)
 
 /* DFP VBUS/VCONN signals */
-GPIO(USB_P1_CC1_VCONN_EN_L,  B, 10, GPIO_OUT_HIGH,  NULL)
-GPIO(USB_P1_CC2_VCONN_EN_L,  B, 5,  GPIO_OUT_HIGH,  NULL)
+GPIO(USB_P1_CC1_VCONN_EN,    B, 10, GPIO_OUT_LOW,  NULL)   /* active HIGH */
+GPIO(USB_P1_CC2_VCONN_EN,    B, 5,  GPIO_OUT_LOW,  NULL)
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
 GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_OUT_HIGH,  NULL)

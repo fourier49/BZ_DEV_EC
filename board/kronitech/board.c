@@ -352,6 +352,9 @@ void board_set_usb_mux(int port, enum typec_mux mux, int polarity)
 	gpio_set_level(usb_mux->ss1_en_l, 0);
 	gpio_set_level(usb_mux->ss2_en_l, 0);
 #else
+	if (mux == TYPEC_MUX_USB) {
+		gpio_set_level(usb_mux->dp_mode_l, 1);  // enable U3 SS lanes
+	}
 	if (mux == TYPEC_MUX_DP || mux == TYPEC_MUX_DOCK) {
 		gpio_set_level(usb_mux->dp_mode_l, 1);  // enable DP AUX
 	}

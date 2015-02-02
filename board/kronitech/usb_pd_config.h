@@ -259,14 +259,16 @@ static inline int pd_adc_read(int port, int cc)
 
 static inline void pd_set_vconn(int port, int polarity, int enable)
 {
-#if 0
 	/* Set VCONN on the opposite CC line from the polarity */
-	if (port == 0)
-		gpio_set_level(polarity ? GPIO_USB_P0_CC1_VCONN1_EN_L :
-					  GPIO_USB_P0_CC2_VCONN1_EN_L, !enable);
-	else
-		gpio_set_level(polarity ? GPIO_USB_P1_CC1_VCONN1_EN_L :
-					  GPIO_USB_P1_CC2_VCONN1_EN_L, !enable);
+#ifdef CONFIG_BIZ_EMU_HOST
+	if (enable) {
+		gpio_set_level(polarity ? GPIO_USB_P1_CC1_VCONN_EN :
+					  GPIO_USB_P1_CC2_VCONN_EN, 1);
+	}
+	else {
+		gpio_set_level(GPIO_USB_P1_CC1_VCONN_EN, 0);
+		gpio_set_level(GPIO_USB_P1_CC2_VCONN_EN, 0);
+	}
 #endif
 }
 
