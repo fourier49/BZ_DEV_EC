@@ -19,10 +19,14 @@
 #define CONFIG_ADC
 #define CONFIG_BOARD_PRE_INIT
 #define CONFIG_CHARGE_MANAGER
+#undef CONFIG_CMD_HASH
+#undef CONFIG_CMD_TYPEC
 /* Minimum ilim = 500 mA */
 #define CONFIG_CHARGER_INPUT_CURRENT PWM_0_MA
 #define CONFIG_COMMON_GPIO_SHORTNAMES
 #undef  CONFIG_CONSOLE_CMDHELP
+#undef  CONFIG_CONSOLE_HISTORY
+#undef CONFIG_DEBUG_ASSERT
 #define CONFIG_FORCE_CONSOLE_RESUME
 #define CONFIG_HIBERNATE_WAKEUP_PINS (STM32_PWR_CSR_EWUP3|STM32_PWR_CSR_EWUP8)
 #undef  CONFIG_HOSTCMD_EVENTS
@@ -30,18 +34,21 @@
 #define CONFIG_I2C
 #undef  CONFIG_LID_SWITCH
 #define CONFIG_LOW_POWER_IDLE
-#define CONFIG_PWM
+#undef  CONFIG_PWM
 #define CONFIG_STM_HWTIMER32
 #undef  CONFIG_TASK_PROFILING
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_ALT_MODE_DFP
+#define CONFIG_USB_PD_CHECK_MAX_REQUEST_ALLOWED
 #undef  CONFIG_USB_PD_COMM_ENABLED
 #define CONFIG_USB_PD_COMM_ENABLED 0
 #define CONFIG_USB_PD_CUSTOM_VDM
 #define CONFIG_USB_PD_DUAL_ROLE
 #define CONFIG_USB_PD_FLASH_ERASE_CHECK
 #define CONFIG_USB_PD_INTERNAL_COMP
+#define CONFIG_USB_PD_LOGGING
+#define CONFIG_USB_PD_LOG_SIZE 512
 #define CONFIG_USB_SWITCH_PI3USB9281
 #undef  CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO
 #define CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO GPIO_USB_C_BC12_SEL
@@ -60,15 +67,9 @@
 #define CONFIG_HOSTCMD_I2C_SLAVE_ADDR CONFIG_USB_PD_I2C_SLAVE_ADDR
 #endif
 
-/*
- * Allow dangerous commands all the time, since we don't have a write protect
- * switch.
- */
-#define CONFIG_SYSTEM_UNLOCKED
-
-/* 10 deferrable tasks on this board */
+/* Maximum number of deferrable functions */
 #undef  DEFERRABLE_MAX_COUNT
-#define DEFERRABLE_MAX_COUNT 10
+#define DEFERRABLE_MAX_COUNT 9
 
 #ifndef __ASSEMBLER__
 
@@ -84,7 +85,7 @@ enum adc_channel {
 	ADC_C1_CC1_PD,
 	ADC_C0_CC2_PD,
 	ADC_C1_CC2_PD,
-	ADC_BOOSTIN,
+	ADC_VBUS,
 	/* Number of ADC channels */
 	ADC_CH_COUNT
 };
@@ -125,6 +126,9 @@ int board_get_battery_soc(void);
 
 /* Send host event to AP */
 void pd_send_host_event(int mask);
+
+/* Update the state of the USB data switches */
+void set_usb_switches(int port, int open);
 
 #endif /* !__ASSEMBLER__ */
 

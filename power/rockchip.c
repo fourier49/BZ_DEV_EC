@@ -78,12 +78,6 @@
  */
 #define PMIC_STARTUP_MS 300
 
-/*
- * Hold time fo the RK808 PMIC reset.
- */
-#define PMIC_RESET_HOLD_TIME (50 * MSEC)
-
-
 /* TODO(crosbug.com/p/25047): move to HOOK_POWER_BUTTON_CHANGE */
 /* 1 if the power button was pressed last time we checked */
 static char power_button_was_pressed;
@@ -110,18 +104,6 @@ static enum power_request_t power_request;
 
 /* Forward declaration */
 static void chipset_turn_off_power_rails(void);
-
-
-/**
- * Set the PMIC RESET signal.
- *
- * @param asserted	Resetting (=1) or idle (=0)
- */
-static void set_pmic_reset(int asserted)
-{
-	/* Signal is active-high */
-	gpio_set_level(GPIO_PMIC_RESET, asserted ? 1 : 0);
-}
 
 
 /**
@@ -170,6 +152,7 @@ static int check_for_power_off_event(void)
 {
 	timestamp_t now;
 	int pressed = 0;
+	int ret = 0;
 
 	/*
 	 * Check for power button press.
@@ -206,13 +189,16 @@ static int check_for_power_off_event(void)
 		timer_cancel(TASK_ID_CHIPSET);
 	}
 
+	/* POWER_GOOD released by AP : shutdown immediately */
+	if (!power_has_signals(IN_POWER_GOOD)) {
+		if (power_button_was_pressed)
+			timer_cancel(TASK_ID_CHIPSET);
+		ret = 3;
+	}
+
 	power_button_was_pressed = pressed;
 
-	/* POWER_GOOD released by AP : shutdown immediately */
-	if (!power_has_signals(IN_POWER_GOOD))
-		return 3;
-
-	return 0;
+	return ret;
 }
 
 static void rockchip_lid_event(void)
@@ -368,42 +354,7 @@ static void power_on(void)
 	for (i = 0; i < PMIC_STARTUP_MS; i++)
 		usleep(1 * MSEC);
 
-	/* Reset the PMIC to make sure it's in a known state. */
-	set_pmic_reset(1);
-	usleep(PMIC_RESET_HOLD_TIME);
-	set_pmic_reset(0);
 	set_pmic_warm_reset(0);
-}
-
-/**
- * Wait for the power button to be released
- *
- * @param timeout_us Timeout in microseconds, or -1 to wait forever
- * @return EC_SUCCESS if ok, or
- *         EC_ERROR_TIMEOUT if power button failed to release
- */
-static int wait_for_power_button_release(unsigned int timeout_us)
-{
-	timestamp_t deadline;
-	timestamp_t now = get_time();
-
-	deadline.val = now.val + timeout_us;
-
-	while (power_button_is_pressed()) {
-		now = get_time();
-		if (timeout_us < 0) {
-			task_wait_event(-1);
-		} else if (timestamp_expired(deadline, &now) ||
-			(task_wait_event(deadline.val - now.val) ==
-			TASK_EVENT_TIMER)) {
-			CPRINTS("power button not released in time");
-			return EC_ERROR_TIMEOUT;
-		}
-	}
-
-	CPRINTS("power button released");
-	power_button_was_pressed = 0;
-	return EC_SUCCESS;
 }
 
 /**
@@ -411,6 +362,8 @@ static int wait_for_power_button_release(unsigned int timeout_us)
  */
 static void power_off(void)
 {
+	unsigned int power_off_timeout = 100; /* ms */
+
 	/* Call hooks before we drop power rails */
 	hook_notify(HOOK_CHIPSET_SHUTDOWN);
 	/* switch off all rails */
@@ -418,6 +371,13 @@ static void power_off(void)
 	/* Change SUSPEND_L and EC_INT pin to high-Z to reduce power draw. */
 	gpio_set_flags(GPIO_SUSPEND_L, GPIO_INPUT);
 	gpio_set_flags(GPIO_EC_INT, GPIO_INPUT);
+
+	/* Wait till we actually turn off to not mess up the state machine. */
+	while (power_get_signals() & IN_POWER_GOOD) {
+		msleep(1);
+		power_off_timeout--;
+		ASSERT(power_off_timeout);
+	}
 
 	lid_opened = 0;
 	enable_sleep(SLEEP_MASK_AP_RUN);
@@ -484,9 +444,10 @@ enum power_state power_handle_state(enum power_state state)
 
 		if (power_wait_signals(IN_POWER_GOOD) == EC_SUCCESS) {
 			CPRINTS("POWER_GOOD seen");
-			if (wait_for_power_button_release(
+			if (power_button_wait_for_release(
 					DELAY_SHUTDOWN_ON_POWER_HOLD) ==
 					EC_SUCCESS) {
+				power_button_was_pressed = 0;
 				set_pmic_pwron(0);
 
 				/* setup misc gpio for S3/S0 functionality */
@@ -547,7 +508,8 @@ enum power_state power_handle_state(enum power_state state)
 		return POWER_S3;
 
 	case POWER_S3S5:
-		wait_for_power_button_release(-1);
+		power_button_wait_for_release(-1);
+		power_button_was_pressed = 0;
 		return POWER_S5;
 
 	case POWER_S5G3:

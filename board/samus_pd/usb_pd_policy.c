@@ -10,13 +10,13 @@
 #include "gpio.h"
 #include "hooks.h"
 #include "host_command.h"
-#include "pi3usb9281.h"
 #include "registers.h"
 #include "system.h"
 #include "task.h"
 #include "timer.h"
 #include "util.h"
 #include "usb_pd.h"
+#include "usb_pd_config.h"
 
 #define CPRINTF(format, args...) cprintf(CC_USBPD, format, ## args)
 #define CPRINTS(format, args...) cprints(CC_USBPD, format, ## args)
@@ -25,6 +25,13 @@
 #define OPERATING_POWER_MW 15000
 #define MAX_POWER_MW       60000
 #define MAX_CURRENT_MA     3000
+
+/*
+ * Do not request any voltage within this deadband region, where
+ * we're not sure whether or not the boost or the bypass will be on.
+ */
+#define INPUT_VOLTAGE_DEADBAND_MIN 9700
+#define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
 
@@ -39,6 +46,13 @@ const uint32_t pd_snk_pdo[] = {
 		PDO_VAR(5000, 20000, 3000),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+int pd_is_valid_input_voltage(int mv)
+{
+	/* Allow any voltage not in the boost bypass deadband */
+	return  (mv < INPUT_VOLTAGE_DEADBAND_MIN) ||
+		(mv > INPUT_VOLTAGE_DEADBAND_MAX);
+}
 
 int pd_check_requested_voltage(uint32_t rdo)
 {
@@ -97,7 +111,7 @@ void pd_set_input_current_limit(int port, uint32_t max_ma,
 	struct charge_port_info charge;
 	charge.current = max_ma;
 	charge.voltage = supply_voltage;
-	charge_manager_update(CHARGE_SUPPLIER_PD, port, &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_PD, port, &charge);
 
 	/* notify host of power info change */
 	pd_send_host_event(PD_EVENT_POWER_CHANGE);
@@ -109,7 +123,7 @@ void typec_set_input_current_limit(int port, uint32_t max_ma,
 	struct charge_port_info charge;
 	charge.current = max_ma;
 	charge.voltage = supply_voltage;
-	charge_manager_update(CHARGE_SUPPLIER_TYPEC, port, &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_TYPEC, port, &charge);
 
 	/* notify host of power info change */
 	pd_send_host_event(PD_EVENT_POWER_CHANGE);
@@ -123,8 +137,12 @@ int pd_board_checks(void)
 int pd_check_power_swap(int port)
 {
 	/* TODO: use battery level to decide to accept/reject power swap */
-	/* Always allow power swap */
-	return 1;
+	/*
+	 * Allow power swap as long as we are acting as a dual role device,
+	 * otherwise assume our role is fixed (not in S0 or console command
+	 * to fix our role).
+	 */
+	return pd_get_dual_role() == PD_DRP_TOGGLE_ON ? 1 : 0;
 }
 
 int pd_check_data_swap(int port, int data_role)
@@ -136,11 +154,18 @@ int pd_check_data_swap(int port, int data_role)
 void pd_execute_data_swap(int port, int data_role)
 {
 	/* Open USB switches when taking UFP role */
-	pi3usb9281_set_switches(port, (data_role == PD_ROLE_UFP));
+	set_usb_switches(port, (data_role == PD_ROLE_UFP));
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+	/* If sink, and dual role toggling is on, then switch to source */
+	if (partner_pr_swap && pr_role == PD_ROLE_SINK &&
+	    pd_get_dual_role() == PD_DRP_TOGGLE_ON)
+		pd_request_power_swap(port);
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 	/* If UFP, try to switch to DFP */
 	if (partner_dr_swap && dr_role == PD_ROLE_UFP)
@@ -153,13 +178,12 @@ const struct svdm_response svdm_rsp = {
 	.modes = NULL,
 };
 
-static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
-			 uint32_t **rpayload)
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
 {
 	int cmd = PD_VDO_CMD(payload[0]);
 	uint16_t dev_id = 0;
-	int is_rw;
-	CPRINTF("VDM/%d [%d] %08x\n", cnt, cmd, payload[0]);
+	int is_rw, is_latest;
 
 	/* make sure we have some payload */
 	if (cnt == 0)
@@ -177,11 +201,20 @@ static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 		if (cnt == 7) {
 			dev_id = VDO_INFO_HW_DEV_ID(payload[6]);
 			is_rw = VDO_INFO_IS_RW(payload[6]);
-			pd_dev_store_rw_hash(port, dev_id, payload + 1,
-					     is_rw ? SYSTEM_IMAGE_RW :
-						     SYSTEM_IMAGE_RO);
+			is_latest = pd_dev_store_rw_hash(port,
+							 dev_id,
+							 payload + 1,
+							 is_rw ?
+							 SYSTEM_IMAGE_RW :
+							 SYSTEM_IMAGE_RO);
 
-			pd_send_host_event(PD_EVENT_UPDATE_DEVICE);
+			/*
+			 * Send update host event unless our RW hash is
+			 * already known to be the latest update RW.
+			 */
+			if (!is_rw || !is_latest)
+				pd_send_host_event(PD_EVENT_UPDATE_DEVICE);
+
 			CPRINTF("DevId:%d.%d SW:%d RW:%d\n",
 				HW_DEV_ID_MAJ(dev_id),
 				HW_DEV_ID_MIN(dev_id),
@@ -199,23 +232,21 @@ static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 	case VDO_CMD_FLIP:
 		board_flip_usb_mux(port);
 		break;
+	case VDO_CMD_GET_LOG:
+		pd_log_recv_vdm(port, cnt, payload);
+		break;
 	}
 
 	return 0;
 }
 
-int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
-{
-	if (PD_VDO_SVDM(payload[0]))
-		return pd_svdm(port, cnt, payload, rpayload);
-	else
-		return pd_custom_vdm(port, cnt, payload, rpayload);
-}
+static int dp_flags[PD_PORT_COUNT];
 
 static void svdm_safe_dp_mode(int port)
 {
 	/* make DP interface safe until configure */
 	board_set_usb_mux(port, TYPEC_MUX_NONE, pd_get_polarity(port));
+	dp_flags[port] = 0;
 }
 
 static int svdm_enter_dp_mode(int port, uint32_t mode_caps)
@@ -229,35 +260,46 @@ static int svdm_enter_dp_mode(int port, uint32_t mode_caps)
 	return -1;
 }
 
-static int dp_on;
-
 static int svdm_dp_status(int port, uint32_t *payload)
 {
+	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_STATUS | VDO_OPOS(pd_alt_mode(port)));
+			 CMD_DP_STATUS | VDO_OPOS(opos));
 	payload[1] = VDO_DP_STATUS(0, /* HPD IRQ  ... not applicable */
 				   0, /* HPD level ... not applicable */
 				   0, /* exit DP? ... no */
 				   0, /* usb mode? ... no */
 				   0, /* multi-function ... no */
-				   dp_on,
+				   (!!(dp_flags[port] & DP_FLAGS_DP_ON)),
 				   0, /* power low? ... no */
-				   dp_on);
+				   (!!(dp_flags[port] & DP_FLAGS_DP_ON)));
 	return 2;
 };
 
 static int svdm_dp_config(int port, uint32_t *payload)
 {
+	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
 	board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
-	dp_on = 1;
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port)));
+			 CMD_DP_CONFIG | VDO_OPOS(opos));
 	payload[1] = VDO_DP_CFG(MODE_DP_PIN_E, /* sink pins */
 				MODE_DP_PIN_E, /* src pins */
 				1,             /* DPv1.3 signaling */
 				2);            /* UFP connected */
 	return 2;
 };
+
+static void svdm_dp_post_config(int port)
+{
+	dp_flags[port] |= DP_FLAGS_DP_ON;
+	if (!(dp_flags[port] & DP_FLAGS_HPD_HI_PENDING))
+		return;
+
+	if (port)
+		gpio_set_level(GPIO_USB_C1_DP_HPD, 1);
+	else
+		gpio_set_level(GPIO_USB_C0_DP_HPD, 1);
+}
 
 static void hpd0_irq_deferred(void)
 {
@@ -281,6 +323,14 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 	int irq = PD_VDO_HPD_IRQ(payload[1]);
 	enum gpio_signal hpd = PORT_TO_HPD(port);
 	cur_lvl = gpio_get_level(hpd);
+
+	/* Its initial DP status message prior to config */
+	if (!(dp_flags[port] & DP_FLAGS_DP_ON)) {
+		if (lvl)
+			dp_flags[port] |= DP_FLAGS_HPD_HI_PENDING;
+		return 1;
+	}
+
 	if (irq & cur_lvl) {
 		gpio_set_level(hpd, 0);
 		/* 250 usecs is minimum, 2msec is max */
@@ -289,7 +339,7 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 		else
 			hook_call_deferred(hpd0_irq_deferred, 300);
 	} else if (irq & !cur_lvl) {
-		CPRINTF("PE ERR: IRQ_HPD w/ HPD_LOW\n");
+		CPRINTF("ERR:HPD:IRQ&LOW\n");
 		return 0; /* nak */
 	} else {
 		gpio_set_level(hpd, lvl);
@@ -340,6 +390,7 @@ const struct svdm_amode_fx supported_modes[] = {
 		.enter = &svdm_enter_dp_mode,
 		.status = &svdm_dp_status,
 		.config = &svdm_dp_config,
+		.post_config = &svdm_dp_post_config,
 		.attention = &svdm_dp_attention,
 		.exit = &svdm_exit_dp_mode,
 	},

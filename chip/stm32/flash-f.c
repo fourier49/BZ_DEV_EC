@@ -362,6 +362,14 @@ int flash_physical_protect_at_boot(enum flash_wp_range range)
 		if (original_val[i] != val[i])
 			write_optb(i * 2 + 8, val[i]);
 
+#ifdef CONFIG_WP_ALWAYS
+	/*
+	 * Set a permanent protection by increasing RDP to level 1,
+	 * trying to unprotected the flash will trigger a full erase.
+	 */
+	write_optb(0, 0x11);
+#endif
+
 	return EC_SUCCESS;
 }
 
@@ -398,10 +406,18 @@ static void unprotect_all_blocks(void)
 
 int flash_pre_init(void)
 {
+	uint32_t reset_flags = system_get_reset_flags();
 	uint32_t prot_flags = flash_get_protect();
 	int need_reset = 0;
 
 	if (flash_physical_restore_state())
+		return EC_SUCCESS;
+
+	/*
+	 * If we have already jumped between images, an earlier image could
+	 * have applied write protection. Nothing additional needs to be done.
+	 */
+	if (reset_flags & RESET_FLAG_SYSJUMP)
 		return EC_SUCCESS;
 
 	if (prot_flags & EC_FLASH_PROTECT_GPIO_ASSERTED) {

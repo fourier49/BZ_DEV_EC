@@ -59,7 +59,7 @@ static void adc_configure(int ain_id)
 	STM32_ADC_CR1 &= ~(1 << 8);
 }
 
-static void adc_configure_all(void)
+static void __attribute__((unused)) adc_configure_all(void)
 {
 	int i;
 
@@ -230,6 +230,7 @@ int adc_read_all_channels(int *data)
 
 	adc_configure_all();
 
+	dma_clear_isr(STM32_DMAC_ADC);
 	dma_start_rx(&dma_adc_option, ADC_CH_COUNT, raw_data);
 
 	/* Start conversion */
@@ -264,6 +265,12 @@ static void adc_init(void)
 	 * So the ADC clock is 8MHz.
 	 */
 	STM32_RCC_APB2ENR |= (1 << 9);
+
+	/*
+	 * ADC clock is divided with respect to AHB, so no delay needed
+	 * here. If ADC clock is the same as AHB, a dummy read on ADC
+	 * register is needed here.
+	 */
 
 	if (!adc_powered()) {
 		/* Power on ADC module */

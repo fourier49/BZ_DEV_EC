@@ -18,6 +18,7 @@ common-$(CONFIG_BACKLIGHT_LID)+=backlight_lid.o
 # instead, since all that's in battery.c is the battery console
 # command?
 common-$(CONFIG_BATTERY_BQ27541)+=battery.o
+common-$(CONFIG_BATTERY_BQ27621)+=battery.o
 common-$(CONFIG_BATTERY_SMART)+=battery.o
 common-$(CONFIG_BUTTON_COUNT)+=button.o
 common-$(CONFIG_CAPSENSE)+=capsense.o
@@ -54,6 +55,7 @@ common-$(CONFIG_KEYBOARD_PROTOCOL_8042)+=keyboard_8042.o
 common-$(CONFIG_KEYBOARD_PROTOCOL_MKBP)+=keyboard_mkbp.o
 common-$(CONFIG_KEYBOARD_TEST)+=keyboard_test.o
 common-$(CONFIG_LED_COMMON)+=led_common.o
+common-$(CONFIG_LED_POLICY_STD)+=led_policy_std.o
 common-$(CONFIG_LID_ANGLE)+=motion_lid.o
 common-$(CONFIG_LID_ANGLE_KEY_SCAN)+=lid_angle.o
 common-$(CONFIG_LID_SWITCH)+=lid_switch.o
@@ -79,6 +81,7 @@ common-$(CONFIG_TEMP_SENSOR)+=temp_sensor.o thermal.o throttle_ap.o
 common-$(CONFIG_USB_PORT_POWER_DUMB)+=usb_port_power_dumb.o
 common-$(CONFIG_USB_PORT_POWER_SMART)+=usb_port_power_smart.o
 common-$(CONFIG_USB_POWER_DELIVERY)+=usb_pd_protocol.o usb_pd_policy.o
+common-$(CONFIG_USB_PD_LOGGING)+=pd_log.o
 common-$(CONFIG_VBOOT_HASH)+=sha256.o vboot_hash.o
 common-$(CONFIG_WIRELESS)+=wireless.o
 common-$(HAS_TASK_CHIPSET)+=chipset.o

@@ -9,6 +9,7 @@
 #include "gpio.h"
 #include "hooks.h"
 #include "i2c.h"
+#include "task.h"
 #include "timer.h"
 #include "pi3usb9281.h"
 #include "util.h"
@@ -25,13 +26,22 @@
 
 #ifdef CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO
 #define PI3USB9281_COUNT 2
+struct mutex mux_lock;
 static inline void select_chip(uint8_t chip_idx)
 {
+	mutex_lock(&mux_lock);
 	gpio_set_level(CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO, chip_idx);
+}
+
+static inline void unselect_chip(void)
+{
+	/* Just release the mutex, no need to change the mux gpio */
+	mutex_unlock(&mux_lock);
 }
 #else
 #define PI3USB9281_COUNT 1
 #define select_chip(x)
+#define unselect_chip()
 #endif
 
 static int saved_interrupts[PI3USB9281_COUNT];
@@ -42,6 +52,8 @@ uint8_t pi3usb9281_read(uint8_t chip_idx, uint8_t reg)
 
 	select_chip(chip_idx);
 	res = i2c_read8(I2C_PORT_MASTER, PI3USB9281_I2C_ADDR, reg, &val);
+	unselect_chip();
+
 	if (res)
 		return 0xee;
 
@@ -54,6 +66,8 @@ int pi3usb9281_write(uint8_t chip_idx, uint8_t reg, uint8_t val)
 
 	select_chip(chip_idx);
 	res = i2c_write8(I2C_PORT_MASTER, PI3USB9281_I2C_ADDR, reg, val);
+	unselect_chip();
+
 	if (res)
 		CPRINTS("PI3USB9281 I2C write failed");
 	return res;
@@ -61,24 +75,27 @@ int pi3usb9281_write(uint8_t chip_idx, uint8_t reg, uint8_t val)
 
 int pi3usb9281_enable_interrupts(uint8_t chip_idx)
 {
-	int ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
+	uint8_t ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
 
 	if (ctrl == 0xee)
 		return EC_ERROR_UNKNOWN;
 
-	return pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL, ctrl & 0x14);
+	return pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
+				ctrl & ~PI3USB9281_CTRL_INT_DIS &
+				PI3USB9281_CTRL_MASK);
 }
 
 int pi3usb9281_disable_interrupts(uint8_t chip_idx)
 {
-	int ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
+	uint8_t ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
 	int rv;
 
 	if (ctrl == 0xee)
 		return EC_ERROR_UNKNOWN;
 
 	rv = pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
-		(ctrl | PI3USB9281_CTRL_INT_MASK) & 0x15);
+			      (ctrl | PI3USB9281_CTRL_INT_DIS) &
+			      PI3USB9281_CTRL_MASK);
 	pi3usb9281_get_interrupts(chip_idx);
 	return rv;
 }
@@ -163,21 +180,18 @@ int pi3usb9281_reset(uint8_t chip_idx)
 
 int pi3usb9281_set_switch_manual(uint8_t chip_idx, int val)
 {
-	int ctrl;
-	int rv;
+	uint8_t ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
 
-	ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
 	if (ctrl == 0xee)
 		return EC_ERROR_UNKNOWN;
 
 	if (val)
-		rv = pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
-			ctrl & ~PI3USB9281_CTRL_AUTO);
+		ctrl &= ~PI3USB9281_CTRL_AUTO;
 	else
-		rv = pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
-			ctrl | PI3USB9281_CTRL_AUTO);
+		ctrl |= PI3USB9281_CTRL_AUTO;
 
-	return rv;
+	return pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
+				ctrl & PI3USB9281_CTRL_MASK);
 }
 
 int pi3usb9281_set_pins(uint8_t chip_idx, uint8_t val)
@@ -187,13 +201,18 @@ int pi3usb9281_set_pins(uint8_t chip_idx, uint8_t val)
 
 int pi3usb9281_set_switches(uint8_t chip_idx, int open)
 {
-	uint8_t ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL) & 0x15;
+	uint8_t ctrl = pi3usb9281_read(chip_idx, PI3USB9281_REG_CONTROL);
+
+	if (ctrl == 0xee)
+		return EC_ERROR_UNKNOWN;
+
 	if (open)
 		ctrl &= ~PI3USB9281_CTRL_SWITCH_AUTO;
 	else
 		ctrl |= PI3USB9281_CTRL_SWITCH_AUTO;
 
-	return pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL, ctrl);
+	return pi3usb9281_write(chip_idx, PI3USB9281_REG_CONTROL,
+				ctrl & PI3USB9281_CTRL_MASK);
 }
 
 static void pi3usb9281_init(void)
@@ -204,7 +223,8 @@ static void pi3usb9281_init(void)
 	for (i = 0; i < PI3USB9281_COUNT; i++) {
 		dev_id = pi3usb9281_read(i, PI3USB9281_REG_DEV_ID);
 
-		if (dev_id != 0x10)
+		if (dev_id != PI3USB9281_DEV_ID &&
+		    dev_id != PI3USB9281_DEV_ID_A)
 			CPRINTS("PI3USB9281[%d] invalid ID 0x%02x", i, dev_id);
 	}
 }

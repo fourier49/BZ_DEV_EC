@@ -147,6 +147,11 @@ int system_unsafe_to_overwrite(uint32_t offset, uint32_t size);
 const char *system_get_image_copy_string(void);
 
 /**
+ * Return a text description of the passed image copy parameter.
+ */
+const char *system_image_copy_t_to_string(enum system_image_copy_t copy);
+
+/**
  * Return the number of bytes used in the specified image.
  *
  * This is the actual size of code+data in the image, as opposed to the
@@ -364,4 +369,22 @@ void system_set_rtc_alarm(uint32_t seconds, uint32_t microseconds);
  */
 void system_reset_rtc_alarm(void);
 
+#ifdef CONFIG_CODERAM_ARCH
+/**
+ * Determine which address should be jumped and return address of littel FW
+ *
+ * Note: This feature is used for code ram arch
+ *
+ * @param flash_addr  jump address of spi flash for RO or RW region
+ */
+uint32_t system_get_lfw_address(uint32_t flash_addr);
+
+/**
+ * Return whcih region is used in Code RAM
+ *
+ * Note: This feature is used for code ram arch
+ *
+ */
+enum system_image_copy_t system_get_shrspi_image_copy(void);
+#endif
 #endif  /* __CROS_EC_SYSTEM_H */

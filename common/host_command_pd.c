@@ -9,6 +9,7 @@
 #include "common.h"
 #include "console.h"
 #include "host_command.h"
+#include "lightbar.h"
 #include "task.h"
 #include "timer.h"
 #include "util.h"
@@ -17,37 +18,71 @@
 
 #define TASK_EVENT_EXCHANGE_PD_STATUS  TASK_EVENT_CUSTOM(1)
 
-void host_command_pd_send_status(void)
+/* By default allow 5V charging only for the dead battery case */
+static enum pd_charge_state charge_state = PD_CHARGE_5V;
+
+#define CHARGE_PORT_UNINITIALIZED -2
+static int charge_port = CHARGE_PORT_UNINITIALIZED;
+
+void host_command_pd_send_status(enum pd_charge_state new_chg_state)
 {
+	/* Update PD MCU charge state if necessary */
+	if (new_chg_state != PD_CHARGE_NO_CHANGE)
+		charge_state = new_chg_state;
+	/* Wake PD HC task to send status */
 	task_set_event(TASK_ID_PDCMD, TASK_EVENT_EXCHANGE_PD_STATUS, 0);
 }
 
-void pd_exchange_status(int *charge_port)
+int pd_get_active_charge_port(void)
+{
+	return charge_port;
+}
+
+static void pd_exchange_status(void)
 {
 	struct ec_params_pd_status ec_status;
-	struct ec_response_pd_status pd_status = {
-		/* default for when the PD isn't cooperating */
-		.active_charge_port = -1,
-	};
+	struct ec_response_pd_status pd_status;
 	int rv = 0;
 
-	/* Send battery state of charge */
+	/* Send PD charge state and battery state of charge */
+	ec_status.charge_state = charge_state;
 	if (charge_get_flags() & CHARGE_FLAG_BATT_RESPONSIVE)
 		ec_status.batt_soc = charge_get_percent();
 	else
 		ec_status.batt_soc = -1;
 
-	rv = pd_host_command(EC_CMD_PD_EXCHANGE_STATUS, 0, &ec_status,
+	rv = pd_host_command(EC_CMD_PD_EXCHANGE_STATUS, 1, &ec_status,
 			     sizeof(struct ec_params_pd_status), &pd_status,
 			     sizeof(struct ec_response_pd_status));
 
-	if (charge_port)
-		*charge_port = pd_status.active_charge_port;
+	/* If PD doesn't support new command version, try old version */
+	if (rv == -EC_RES_INVALID_VERSION)
+		rv = pd_host_command(EC_CMD_PD_EXCHANGE_STATUS, 0, &ec_status,
+			     sizeof(struct ec_params_pd_status), &pd_status,
+			     sizeof(struct ec_response_pd_status));
 
 	if (rv < 0) {
 		CPRINTS("Host command to PD MCU failed");
 		return;
 	}
+
+#ifdef HAS_TASK_LIGHTBAR
+	/*
+	 * If charge port has changed, and it was initialized, then show
+	 * battery status on lightbar.
+	 */
+	if (pd_status.active_charge_port != charge_port) {
+		if (charge_port != CHARGE_PORT_UNINITIALIZED) {
+			charge_port = pd_status.active_charge_port;
+			lightbar_sequence(LIGHTBAR_TAP);
+		} else {
+			charge_port = pd_status.active_charge_port;
+		}
+	}
+#else
+	/* Store the active charge port */
+	charge_port = pd_status.active_charge_port;
+#endif
 
 	/* Set input current limit */
 	rv = charge_set_input_current_limit(MAX(pd_status.curr_lim_ma,
@@ -63,7 +98,7 @@ void pd_exchange_status(int *charge_port)
 void pd_command_task(void)
 {
 	/* On startup exchange status with the PD */
-	pd_exchange_status(0);
+	pd_exchange_status();
 
 	while (1) {
 		/* Wait for the next command event */
@@ -71,6 +106,6 @@ void pd_command_task(void)
 
 		/* Process event to send status to PD */
 		if (evt & TASK_EVENT_EXCHANGE_PD_STATUS)
-			pd_exchange_status(0);
+			pd_exchange_status();
 	}
 }

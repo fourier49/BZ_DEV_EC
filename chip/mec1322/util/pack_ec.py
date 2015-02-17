@@ -143,11 +143,11 @@ def main():
                       help="PEM key file for signing payload",
                       default="rsakey_sign_payload.pem")
   parser.add_argument("-s", "--spi_size", type=int,
-                      help="Size of the SPI flash in MB",
-                      default=4)
+                      help="Size of the SPI flash in KB",
+                      default=4096)
   parser.add_argument("-l", "--header_loc", type=int,
                       help="Location of header in SPI flash",
-                      default=0x170000)
+                      default=0)
   parser.add_argument("-p", "--payload_offset", type=int,
                       help="The offset of payload from the header",
                       default=0x240)
@@ -162,7 +162,7 @@ def main():
                       default=0xb)
   args = parser.parse_args()
 
-  spi_size = args.spi_size * 1024 * 1024
+  spi_size = args.spi_size * 1024
   spi_list = []
 
   payload = GetPayload(args.input)

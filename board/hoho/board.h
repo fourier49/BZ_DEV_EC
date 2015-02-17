@@ -35,14 +35,21 @@
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_HW_DEV_ID_BOARD_MAJOR USB_PD_HW_DEV_ID_HOHO
-#define CONFIG_USB_PD_HW_DEV_ID_BOARD_MINOR 1
+#define CONFIG_USB_PD_HW_DEV_ID_BOARD_MINOR 2
 #define CONFIG_USB_PD_DUAL_ROLE
 #define CONFIG_USB_PD_CUSTOM_VDM
 #define CONFIG_USB_PD_FLASH
 #define CONFIG_USB_PD_INTERNAL_COMP
 #define CONFIG_USB_PD_IDENTITY_HW_VERS 1
 #define CONFIG_USB_PD_IDENTITY_SW_VERS 1
+#define CONFIG_USB_PD_LOGGING
+#define CONFIG_USB_PD_LOG_SIZE 256
 #define CONFIG_USB_PD_NO_VBUS_DETECT
+/* mcdp2850 serial interface */
+#define CONFIG_MCDP28X0 usart3_hw
+#define CONFIG_STREAM
+#define CONFIG_STREAM_USART
+#define CONFIG_STREAM_USART3
 #undef CONFIG_WATCHDOG_HELP
 #undef CONFIG_LID_SWITCH
 #undef CONFIG_TASK_PROFILING
@@ -51,11 +58,8 @@
 #define CONFIG_USB_PID 0x5010
 #define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
-/*
- * Allow dangerous commands all the time, since we don't have a write protect
- * switch.
- */
-#define CONFIG_SYSTEM_UNLOCKED
+/* No Write-protect GPIO, force the write-protection */
+#define CONFIG_WP_ALWAYS
 
 #ifndef __ASSEMBLER__
 

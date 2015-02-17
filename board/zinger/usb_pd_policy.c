@@ -7,6 +7,7 @@
 #include "common.h"
 #include "console.h"
 #include "debug.h"
+#include "ec_commands.h"
 #include "hooks.h"
 #include "registers.h"
 #include "system.h"
@@ -50,7 +51,7 @@ static inline void output_disable(void)
 static inline int output_is_enabled(void)
 {
 	/* GPF0 = enable output FET */
-	return STM32_GPIO_IDR(GPIO_F) & 1;
+	return STM32_GPIO_ODR(GPIO_F) & 1;
 }
 
 /* ----- fault conditions ----- */
@@ -112,9 +113,12 @@ static timestamp_t fault_deadline;
 #define OVP_REC_MV(mv)  VBUS_MV((mv) * 11 / 10)
 
 /* Maximum discharging delay */
-#define DISCHARGE_TIMEOUT (90*MSEC)
+#define DISCHARGE_TIMEOUT (275*MSEC)
 /* Voltage overshoot below the OVP threshold for discharging to avoid OVP */
 #define DISCHARGE_OVERSHOOT_MV VBUS_MV(200)
+
+/* Time to wait after last RX edge interrupt before allowing deep sleep */
+#define PD_RX_SLEEP_TIMEOUT (100*MSEC)
 
 /* ----- output voltage discharging ----- */
 
@@ -135,7 +139,7 @@ static inline void discharge_disable(void)
 static inline int discharge_is_enabled(void)
 {
 	/* GPF1 = enable discharge FET */
-	return STM32_GPIO_IDR(GPIO_F) & 2;
+	return STM32_GPIO_ODR(GPIO_F) & 2;
 }
 
 static void discharge_voltage(int target_volt)
@@ -152,13 +156,23 @@ static void discharge_voltage(int target_volt)
 
 #define PDO_FIXED_FLAGS (PDO_FIXED_EXTERNAL | PDO_FIXED_DATA_SWAP)
 
+/* Voltage indexes for the PDOs */
+enum volt_idx {
+	PDO_IDX_5V  = 0,
+	PDO_IDX_12V = 1,
+	PDO_IDX_20V = 2,
+
+	PDO_IDX_COUNT
+};
+
 /* Power Delivery Objects */
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,  RATED_CURRENT, PDO_FIXED_FLAGS),
-		PDO_FIXED(12000, RATED_CURRENT, PDO_FIXED_FLAGS),
-		PDO_FIXED(20000, RATED_CURRENT, PDO_FIXED_FLAGS),
+	[PDO_IDX_5V]  = PDO_FIXED(5000,  RATED_CURRENT, PDO_FIXED_FLAGS),
+	[PDO_IDX_12V] = PDO_FIXED(12000, RATED_CURRENT, PDO_FIXED_FLAGS),
+	[PDO_IDX_20V] = PDO_FIXED(20000, RATED_CURRENT, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
+BUILD_ASSERT(ARRAY_SIZE(pd_src_pdo) == PDO_IDX_COUNT);
 
 /* PDO voltages (should match the table above) */
 static const struct {
@@ -167,14 +181,19 @@ static const struct {
 	int       ovp;    /* over-voltage limit in mV */
 	int       ovp_rec;/* over-voltage recovery threshold in mV */
 } voltages[ARRAY_SIZE(pd_src_pdo)] = {
-	{VO_5V,  UVP_MV(5000),  OVP_MV(5000), OVP_REC_MV(5000)},
-	{VO_12V, UVP_MV(12000), OVP_MV(12000), OVP_REC_MV(12000)},
-	{VO_20V, UVP_MV(20000), OVP_MV(20000), OVP_REC_MV(20000)},
+	[PDO_IDX_5V]  = {VO_5V,  UVP_MV(5000),  OVP_MV(5000),
+						OVP_REC_MV(5000)},
+	[PDO_IDX_12V] = {VO_12V, UVP_MV(12000), OVP_MV(12000),
+						OVP_REC_MV(12000)},
+	[PDO_IDX_20V] = {VO_20V, UVP_MV(20000), OVP_MV(20000),
+						OVP_REC_MV(20000)},
 };
 
 /* current and previous selected PDO entry */
 static int volt_idx;
 static int last_volt_idx;
+/* target voltage at the end of discharge */
+static int discharge_volt_idx;
 
 /* output current measurement */
 int vbus_amp;
@@ -211,12 +230,18 @@ int pd_check_requested_voltage(uint32_t rdo)
 
 void pd_transition_voltage(int idx)
 {
-	if (idx - 1 < volt_idx) { /* down voltage transition */
+	last_volt_idx = volt_idx;
+	volt_idx = idx - 1;
+	if (volt_idx < last_volt_idx) { /* down voltage transition */
 		/* Stop OCP monitoring */
 		adc_disable_watchdog();
 
-		discharge_voltage(voltages[idx - 1].ovp);
-	} else if (idx - 1 > volt_idx) { /* up voltage transition */
+		discharge_volt_idx = volt_idx;
+		/* from 20V : do an intermediate step at 12V */
+		if (volt_idx == PDO_IDX_5V && last_volt_idx == PDO_IDX_20V)
+			volt_idx = PDO_IDX_12V;
+		discharge_voltage(voltages[volt_idx].ovp);
+	} else if (volt_idx > last_volt_idx) { /* up voltage transition */
 		if (discharge_is_enabled()) {
 			/* Make sure discharging is disabled */
 			discharge_disable();
@@ -225,8 +250,6 @@ void pd_transition_voltage(int idx)
 					    MAX_CURRENT_FAST, 0);
 		}
 	}
-	last_volt_idx = volt_idx;
-	volt_idx = idx - 1;
 	set_output_voltage(voltages[volt_idx].select);
 }
 
@@ -248,16 +271,21 @@ void pd_power_supply_reset(int port)
 	int need_discharge = (volt_idx > 0) || discharge_is_enabled();
 
 	output_disable();
-	volt_idx = 0;
-	set_output_voltage(VO_5V);
+	last_volt_idx = volt_idx;
+	/* from 20V : do an intermediate step at 12V */
+	volt_idx = volt_idx == PDO_IDX_20V ? PDO_IDX_12V : PDO_IDX_5V;
+	set_output_voltage(voltages[volt_idx].select);
 	/* TODO transition delay */
 
 	/* Stop OCP monitoring to save power */
 	adc_disable_watchdog();
 
 	/* discharge voltage to 5V ? */
-	if (need_discharge)
-		discharge_voltage(voltages[0].ovp);
+	if (need_discharge) {
+		/* final target : 5V  */
+		discharge_volt_idx = PDO_IDX_5V;
+		discharge_voltage(voltages[volt_idx].ovp);
+	}
 }
 
 int pd_check_data_swap(int port, int data_role)
@@ -271,8 +299,11 @@ void pd_execute_data_swap(int port, int data_role)
 	/* Do nothing */
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 	/* If DFP, try to switch to UFP */
 	if (partner_dr_swap && dr_role == PD_ROLE_DFP)
@@ -295,7 +326,7 @@ int pd_board_checks(void)
 	/* If output is disabled for long enough, then hibernate */
 	if (!pd_is_connected(0) && hib_to_ready) {
 		if (get_time().val >= hib_to.val) {
-			debug_printf("hibernate\n");
+			debug_printf("hib\n");
 			__enter_hibernate(0, 0);
 		}
 	} else {
@@ -305,14 +336,15 @@ int pd_board_checks(void)
 #endif
 
 	/* if it's been a while since last RX edge, then allow deep sleep */
-	if (get_time_since_last_edge(0) > PD_RX_TRANSITION_WINDOW)
+	if (get_time_since_last_edge(0) > PD_RX_SLEEP_TIMEOUT)
 		enable_sleep(SLEEP_MASK_USB_PD);
 
 	vbus_volt = adc_read_channel(ADC_CH_V_SENSE);
 	vbus_amp = adc_read_channel(ADC_CH_A_SENSE);
 
 	if (fault == FAULT_FAST_OCP) {
-		debug_printf("Fast OverCurrent\n");
+		debug_printf("Fast OCP\n");
+		pd_log_event(PD_EVENT_PS_FAULT, 0, PS_FAULT_FAST_OCP, NULL);
 		fault = FAULT_OCP;
 		/* reset over-current after 1 second */
 		fault_deadline.val = get_time().val + OCP_TIMEOUT;
@@ -327,9 +359,10 @@ int pd_board_checks(void)
 				break;
 		/* trigger the slow OCP iff all 4 samples are above the max */
 		if (count == 3) {
-			debug_printf("OverCurrent : %d mA\n",
+			debug_printf("OCP %d mA\n",
 			  vbus_amp * VDDA_MV / CURR_GAIN * 1000
 				   / R_SENSE / ADC_SCALE);
+			pd_log_event(PD_EVENT_PS_FAULT, 0, PS_FAULT_OCP, NULL);
 			fault = FAULT_OCP;
 			/* reset over-current after 1 second */
 			fault_deadline.val = get_time().val + OCP_TIMEOUT;
@@ -356,9 +389,11 @@ int pd_board_checks(void)
 
 	if ((output_is_enabled() && (vbus_volt > voltages[ovp_idx].ovp)) ||
 	    (fault && (vbus_volt > voltages[ovp_idx].ovp_rec))) {
-		if (!fault)
-			debug_printf("OverVoltage : %d mV\n",
+		if (!fault) {
+			debug_printf("OVP %d mV\n",
 				     ADC_TO_VOLT_MV(vbus_volt));
+			pd_log_event(PD_EVENT_PS_FAULT, 0, PS_FAULT_OVP, NULL);
+		}
 		fault = FAULT_OVP;
 		/* no timeout */
 		fault_deadline.val = get_time().val;
@@ -368,15 +403,20 @@ int pd_board_checks(void)
 	/* the discharge did not work properly */
 	if (discharge_is_enabled() &&
 		(get_time().val > discharge_deadline.val)) {
+		/* ensure we always finish a 2-step discharge */
+		volt_idx = discharge_volt_idx;
+		set_output_voltage(voltages[volt_idx].select);
 		/* stop it */
 		discharge_disable();
 		/* enable over-current monitoring */
 		adc_enable_watchdog(ADC_CH_A_SENSE, MAX_CURRENT_FAST, 0);
-		debug_printf("Discharge failure : %d mV\n",
+		debug_printf("Disch FAIL %d mV\n",
 			     ADC_TO_VOLT_MV(vbus_volt));
+		pd_log_event(PD_EVENT_PS_FAULT, 0, PS_FAULT_DISCH, NULL);
 		fault = FAULT_DISCHARGE;
 		/* reset it after 1 second */
 		fault_deadline.val = get_time().val + OCP_TIMEOUT;
+		return EC_ERROR_INVAL;
 	}
 
 	/* everything is good *and* the error condition has expired */
@@ -399,10 +439,18 @@ void pd_adc_interrupt(void)
 	/* Clear flags */
 	STM32_ADC_ISR = 0x8e;
 
-	if (discharge_is_enabled()) { /* discharge completed */
-		discharge_disable();
-		/* enable over-current monitoring */
-		adc_enable_watchdog(ADC_CH_A_SENSE, MAX_CURRENT_FAST, 0);
+	if (discharge_is_enabled()) {
+		if (discharge_volt_idx != volt_idx) {
+			/* first step of the discharge completed: now 12V->5V */
+			volt_idx = PDO_IDX_5V;
+			set_output_voltage(VO_5V);
+			discharge_voltage(voltages[PDO_IDX_5V].ovp);
+		} else { /* discharge complete */
+			discharge_disable();
+			/* enable over-current monitoring */
+			adc_enable_watchdog(ADC_CH_A_SENSE,
+					    MAX_CURRENT_FAST, 0);
+		}
 	} else {/* Over-current detection */
 		/* cut the power output */
 		pd_power_supply_reset(0);
@@ -491,8 +539,8 @@ const struct svdm_response svdm_rsp = {
 	.exit_mode = &svdm_exit_mode,
 };
 
-static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
-			 uint32_t **rpayload)
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
 {
 	int cmd = PD_VDO_CMD(payload[0]);
 	int rsize;
@@ -515,23 +563,17 @@ static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 			payload[1] = ADC_TO_CURR_MA(vbus_amp);
 			rsize = 2;
 			break;
+		case VDO_CMD_GET_LOG:
+			rsize = pd_vdm_get_log_entry(payload);
+			break;
 		default:
 			/* Unknown : do not answer */
 			return 0;
 		}
 	}
 
-	debug_printf("%T] DONE\n");
 	/* respond (positively) to the request */
 	payload[0] |= VDO_SRC_RESPONDER;
 
 	return rsize;
-}
-
-int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
-{
-	if (PD_VDO_SVDM(payload[0]))
-		return pd_svdm(port, cnt, payload, rpayload);
-	else
-		return pd_custom_vdm(port, cnt, payload, rpayload);
 }

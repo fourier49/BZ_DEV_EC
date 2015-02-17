@@ -210,18 +210,17 @@ void host_throttle_cpu(int throttle);
 
 /**
  * Signal host command task to send status to PD MCU.
+ *
+ * @new_chg_state PD MCU charge state
  */
-void host_command_pd_send_status(void);
+void host_command_pd_send_status(enum pd_charge_state new_chg_state);
 
 /**
- * Ask the PD MCU for its status, obtaining the current charge_port as a
- * side-effect (-1 means none or don't know).
+ * Get the active charge port from the PD
  *
- * @param charge_port   If present, updated with the current charge port:
- *                        -1 == none/unknown, 0 == left, 1 == right.
+ * @return -1 == none/unknown, 0 == left, 1 == right.
  */
-void pd_exchange_status(int *charge_port);
-
+int pd_get_active_charge_port(void);
 
 /**
  * Send host command to PD MCU.

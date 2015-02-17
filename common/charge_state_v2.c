@@ -28,8 +28,8 @@
 #define CPUTS(outstr) cputs(CC_CHARGER, outstr)
 #define CPRINTS(format, args...) cprints(CC_CHARGER, format, ## args)
 
-#define LOW_BATTERY_SHUTDOWN_TIMEOUT_US (LOW_BATTERY_SHUTDOWN_TIMEOUT * SECOND)
-#define HIGH_TEMP_SHUTDOWN_TIMEOUT_US   (HIGH_TEMP_SHUTDOWN_TIMEOUT * SECOND)
+#define CRITICAL_BATTERY_SHUTDOWN_TIMEOUT_US \
+	(CONFIG_BATTERY_CRITICAL_SHUTDOWN_TIMEOUT * SECOND)
 #define PRECHARGE_TIMEOUT_US (PRECHARGE_TIMEOUT * SECOND)
 #define LFCC_EVENT_THRESH 5 /* Full-capacity change reqd for host event */
 
@@ -39,12 +39,12 @@
  */
 static const struct battery_info *batt_info;
 static struct charge_state_data curr;
-static int prev_ac, prev_charge;
+static int prev_ac, prev_charge, prev_full;
+static int is_full; /* battery not accepting current */
 static int state_machine_force_idle;
 static int manual_mode;  /* volt/curr are no longer maintained by charger */
 static unsigned int user_current_limit = -1U;
 test_export_static timestamp_t shutdown_warning_time;
-test_export_static timestamp_t shutdown_batttemp_warning_time;
 static timestamp_t precharge_start_time;
 static int battery_seems_to_be_dead;
 static int battery_seems_to_be_disconnected;
@@ -171,14 +171,31 @@ static void update_dynamic_battery_info(void)
 	int *memmap_lfcc = (int *)host_get_memmap(EC_MEMMAP_BATT_LFCC);
 	uint8_t *memmap_flags = host_get_memmap(EC_MEMMAP_BATT_FLAG);
 	uint8_t tmp;
-	int cap_changed;
+	int send_batt_status_event = 0;
+	int send_batt_info_event = 0;
+	static int batt_present;
 
 	tmp = 0;
 	if (curr.ac)
 		tmp |= EC_BATT_FLAG_AC_PRESENT;
 
-	if (curr.batt.is_present == BP_YES)
+	if (curr.batt.is_present == BP_YES) {
 		tmp |= EC_BATT_FLAG_BATT_PRESENT;
+		batt_present = 1;
+		/* Tell the AP to read battery info if it is newly present. */
+		if (!(*memmap_flags & EC_BATT_FLAG_BATT_PRESENT))
+			send_batt_info_event++;
+	} else {
+		/*
+		 * Require two consecutive updates with BP_NOT_SURE
+		 * before reporting it gone to the host.
+		 */
+		if (batt_present)
+			tmp |= EC_BATT_FLAG_BATT_PRESENT;
+		else if (*memmap_flags & EC_BATT_FLAG_BATT_PRESENT)
+			send_batt_info_event++;
+		batt_present = 0;
+	}
 
 	if (!(curr.batt.flags & BATT_FLAG_BAD_VOLTAGE))
 		*memmap_volt = curr.batt.voltage;
@@ -186,15 +203,24 @@ static void update_dynamic_battery_info(void)
 	if (!(curr.batt.flags & BATT_FLAG_BAD_CURRENT))
 		*memmap_rate = ABS(curr.batt.current);
 
-	if (!(curr.batt.flags & BATT_FLAG_BAD_REMAINING_CAPACITY))
-		*memmap_cap = curr.batt.remaining_capacity;
+	if (!(curr.batt.flags & BATT_FLAG_BAD_REMAINING_CAPACITY)) {
+		/*
+		 * If we're running off the battery, it must have some charge.
+		 * Don't report zero charge, as that has special meaning
+		 * to Chrome OS powerd.
+		 */
+		if (curr.batt.remaining_capacity == 0 && !curr.batt_is_charging)
+			*memmap_cap = 1;
+		else
+			*memmap_cap = curr.batt.remaining_capacity;
+	}
 
-	cap_changed = 0;
 	if (!(curr.batt.flags & BATT_FLAG_BAD_FULL_CAPACITY) &&
 	    (curr.batt.full_capacity <= (*memmap_lfcc - LFCC_EVENT_THRESH) ||
 	     curr.batt.full_capacity >= (*memmap_lfcc + LFCC_EVENT_THRESH))) {
 		*memmap_lfcc = curr.batt.full_capacity;
-		cap_changed = 1;
+		/* Poke the AP if the full_capacity changes. */
+		send_batt_info_event++;
 	}
 
 	if (curr.batt.is_present == BP_YES &&
@@ -207,12 +233,15 @@ static void update_dynamic_battery_info(void)
 
 	/* Tell the AP to re-read battery status if charge state changes */
 	if (*memmap_flags != tmp)
-		host_set_single_event(EC_HOST_EVENT_BATTERY_STATUS);
+		send_batt_status_event++;
+
+	/* Update flags before sending host events. */
 	*memmap_flags = tmp;
 
-	/* Poke the AP if the full_capacity changes. */
-	if (cap_changed)
+	if (send_batt_info_event)
 		host_set_single_event(EC_HOST_EVENT_BATTERY);
+	if (send_batt_status_event)
+		host_set_single_event(EC_HOST_EVENT_BATTERY_STATUS);
 }
 
 static const char * const state_list[] = {
@@ -275,14 +304,16 @@ static void show_charging_progress(void)
 	}
 
 	if (rv)
-		CPRINTS("Battery %d%% / ??h:?? %s",
+		CPRINTS("Battery %d%% / ??h:?? %s%s",
 			curr.batt.state_of_charge,
-			to_full ? "to full" : "to empty");
+			to_full ? "to full" : "to empty",
+			is_full ? ", not accepting current" : "");
 	else
-		CPRINTS("Battery %d%% / %dh:%d %s",
+		CPRINTS("Battery %d%% / %dh:%d %s%s",
 			curr.batt.state_of_charge,
 			minutes / 60, minutes % 60,
-			to_full ? "to full" : "to empty");
+			to_full ? "to full" : "to empty",
+			is_full ? ", not accepting current" : "");
 
 	if (debugging) {
 		ccprintf("battery:\n");
@@ -292,6 +323,26 @@ static void show_charging_progress(void)
 		ccprintf("chg:\n");
 		dump_charge_state();
 	}
+}
+
+/* Calculate if battery is full based on whether it is accepting charge */
+static int calc_is_full(void)
+{
+	static int ret;
+
+	/* If bad state of charge reading, return last value */
+	if (curr.batt.flags & BATT_FLAG_BAD_STATE_OF_CHARGE ||
+	    curr.batt.state_of_charge > 100)
+		return ret;
+	/*
+	 * Battery is full when SoC is above 90% and battery desired current
+	 * is 0. This is necessary because some batteries stop charging when
+	 * the SoC still reports <100%, so we need to check desired current
+	 * to know if it is actually full.
+	 */
+	ret = (curr.batt.state_of_charge >= 90 &&
+	       curr.batt.desired_current == 0);
+	return ret;
 }
 
 /*
@@ -306,18 +357,27 @@ static int charge_request(int voltage, int current)
 	if (!voltage || !current)
 		voltage = current = 0;
 
-	if (prev_volt != voltage || prev_curr != current)
-		CPRINTS("%s(%dmV, %dmA)", __func__, voltage, current);
+	if (curr.ac) {
+		if (prev_volt != voltage || prev_curr != current)
+			CPRINTS("%s(%dmV, %dmA)", __func__, voltage, current);
+	}
+
+	/*
+	 * Set current before voltage so that if we are just starting
+	 * to charge, we allow some time (i2c delay) for charging circuit to
+	 * start at a voltage just above battery voltage before jumping
+	 * up. This helps avoid large current spikes when connecting
+	 * battery.
+	 */
+	if (current >= 0)
+		r2 = charger_set_current(current);
+	if (r2 != EC_SUCCESS)
+		problem(PR_SET_CURRENT, r2);
 
 	if (voltage >= 0)
 		r1 = charger_set_voltage(voltage);
 	if (r1 != EC_SUCCESS)
 		problem(PR_SET_VOLTAGE, r1);
-
-	if (current >= 0)
-		r2 = charger_set_current(current);
-	if (r2 != EC_SUCCESS)
-		problem(PR_SET_CURRENT, r2);
 
 	/*
 	 * Set the charge inhibit bit when possible as it appears to save
@@ -370,50 +430,6 @@ static inline int battery_too_hot(int batt_temp_c)
 		 batt_temp_c < batt_info->discharging_min_c));
 }
 
-static void prevent_hot_discharge(void)
-{
-	int batt_temp_c;
-
-	/*
-	 * TODO(crosbug.com/p/27642): The thermal loop should watch the battery
-	 * temp anyway, so it can turn fans on. It could also force an AP
-	 * shutdown if it's too hot, but AFAIK we don't have anything in place
-	 * to do a battery shutdown if it's really really hot. We probably
-	 * should, just in case.
-	 */
-	batt_temp_c = DECI_KELVIN_TO_CELSIUS(curr.batt.temperature);
-
-	if (!battery_too_hot(batt_temp_c)) {
-		/* Reset shutdown warning time */
-		shutdown_batttemp_warning_time.val = 0;
-		return;
-	}
-
-	CPRINTS("Batt temp out of range %dC", batt_temp_c);
-
-	if (!shutdown_batttemp_warning_time.val) {
-		CPRINTS("charge warn shutdown due to battery temp %dC",
-			batt_temp_c);
-		shutdown_batttemp_warning_time.val = get_time().val;
-		if (!chipset_in_state(CHIPSET_STATE_ANY_OFF))
-			host_set_single_event(EC_HOST_EVENT_BATTERY_SHUTDOWN);
-	} else if (get_time().val > shutdown_batttemp_warning_time.val +
-		   HIGH_TEMP_SHUTDOWN_TIMEOUT_US) {
-		if (chipset_in_state(CHIPSET_STATE_ANY_OFF)) {
-#ifdef CONFIG_HIBERNATE
-			/* Timeout waiting for temp to change */
-			CPRINTS("charge force EC hib due to batt temp %dC",
-				batt_temp_c);
-			system_hibernate(0, 0);
-#endif
-		} else {
-			CPRINTS("charge force shutdown due to batt temp %dC",
-				batt_temp_c);
-			chipset_force_shutdown();
-		}
-	}
-}
-
 /* True if we know the charge is too low, or we know the voltage is too low. */
 static inline int battery_too_low(void)
 {
@@ -423,34 +439,56 @@ static inline int battery_too_low(void)
 		 curr.batt.voltage <= batt_info->voltage_min));
 }
 
-/* Shut everything down before the battery completely dies. */
-static void prevent_deep_discharge(void)
+
+/*
+ * Send host event to the AP if the battery is temperature or charge level
+ * is critical. Force-shutdown if the problem isn't corrected after timeout.
+ */
+static void shutdown_on_critical_battery(void)
 {
-	if (!battery_too_low() || curr.batt_is_charging) {
+	int batt_temp_c;
+	int battery_critical = 0;
+
+	/*
+	 * TODO(crosbug.com/p/27642): The thermal loop should watch the battery
+	 * temp, so it can turn fans on.
+	 */
+	batt_temp_c = DECI_KELVIN_TO_CELSIUS(curr.batt.temperature);
+	if (battery_too_hot(batt_temp_c)) {
+		CPRINTS("Batt temp out of range: %dC", batt_temp_c);
+		battery_critical = 1;
+	}
+
+	if (battery_too_low() && !curr.batt_is_charging) {
+		CPRINTS("Low battery: %d%%, %dmV",
+			curr.batt.state_of_charge, curr.batt.voltage);
+		battery_critical = 1;
+	}
+
+	if (!battery_critical) {
 		/* Reset shutdown warning time */
 		shutdown_warning_time.val = 0;
 		return;
 	}
 
-	CPRINTS("Low battery: %d%%, %dmV",
-		curr.batt.state_of_charge, curr.batt.voltage);
-
 	if (!shutdown_warning_time.val) {
-		CPRINTS("charge warn shutdown due to low battery");
+		CPRINTS("charge warn shutdown due to critical battery");
 		shutdown_warning_time = get_time();
 		if (!chipset_in_state(CHIPSET_STATE_ANY_OFF))
 			host_set_single_event(EC_HOST_EVENT_BATTERY_SHUTDOWN);
 	} else if (get_time().val > shutdown_warning_time.val +
-		   LOW_BATTERY_SHUTDOWN_TIMEOUT_US) {
+		   CRITICAL_BATTERY_SHUTDOWN_TIMEOUT_US) {
 		if (chipset_in_state(CHIPSET_STATE_ANY_OFF)) {
 #ifdef CONFIG_HIBERNATE
 			/* Timeout waiting for charger to provide more power */
-			CPRINTS("charge force EC hibernate due to low battery");
+			CPRINTS(
+			  "charge force EC hibernate due to critical battery");
 			system_hibernate(0, 0);
 #endif
 		} else {
 			/* Timeout waiting for AP to shut down, so kill it */
-			CPRINTS("charge force shutdown due to low battery");
+			CPRINTS(
+			  "charge force shutdown due to critical battery");
 			chipset_force_shutdown();
 		}
 	}
@@ -484,10 +522,21 @@ const struct batt_params *charger_current_battery_params(void)
 
 void charger_init(void)
 {
+	const struct charger_info * const info = charger_get_info();
+
 	/* Initialize current state */
 	memset(&curr, 0, sizeof(curr));
 	curr.batt.is_present = BP_NOT_SURE;
-	curr.desired_input_current = CONFIG_CHARGER_INPUT_CURRENT;
+
+	/*
+	 * If system is not locked, then use max input current limit so
+	 * that if there is no battery present, we can pull as much power
+	 * as needed. If battery is present, then input current will be
+	 * immediately lowered to the real desired value.
+	 */
+	curr.desired_input_current = system_is_locked() ?
+					CONFIG_CHARGER_INPUT_CURRENT :
+					info->input_current_max;
 }
 DECLARE_HOOK(HOOK_INIT, charger_init, HOOK_PRIO_DEFAULT);
 
@@ -496,6 +545,7 @@ void charger_task(void)
 {
 	int sleep_usec;
 	int need_static = 1;
+	const struct charger_info * const info = charger_get_info();
 
 	/* Get the battery-specific values */
 	batt_info = battery_get_info();
@@ -561,6 +611,13 @@ void charger_task(void)
 			curr.batt.flags |= BATT_FLAG_BAD_TEMPERATURE;
 		}
 
+		/* If the battery thinks it's above 100%, don't believe it */
+		if (curr.batt.state_of_charge > 100) {
+			CPRINTS("ignoring ridiculous batt.soc of %d%%",
+				curr.batt.state_of_charge);
+			curr.batt.flags |= BATT_FLAG_BAD_STATE_OF_CHARGE;
+		}
+
 		/*
 		 * Now decide what we want to do about it. We'll normally just
 		 * pass along whatever the battery wants to the charger. Note
@@ -595,8 +652,7 @@ void charger_task(void)
 		curr.batt_is_charging = curr.ac && (curr.batt.current >= 0);
 
 		/* Don't let the battery hurt itself. */
-		prevent_hot_discharge();
-		prevent_deep_discharge();
+		shutdown_on_critical_battery();
 
 		if (!curr.ac) {
 			curr.state = ST_DISCHARGE;
@@ -691,28 +747,17 @@ void charger_task(void)
 		}
 
 		/*
-		 * If battery seems to be disconnected, we need to get it
-		 * out of that state, even if the charge level is full.
-		 */
-		if (curr.batt.state_of_charge >= BATTERY_LEVEL_FULL &&
-		    !battery_seems_to_be_disconnected) {
-			/* Full up. Stop charging */
-			curr.state = ST_IDLE;
-			goto wait_for_it;
-		}
-
-		/*
 		 * TODO(crosbug.com/p/27643): Quit trying if charging too long
 		 * without getting full (CONFIG_CHARGER_TIMEOUT_HOURS).
 		 */
 
+wait_for_it:
 #ifdef CONFIG_CHARGER_PROFILE_OVERRIDE
 		sleep_usec = charger_profile_override(&curr);
 		if (sleep_usec < 0)
 			problem(PR_CUSTOM, sleep_usec);
 #endif
 
-wait_for_it:
 		/* Keep the AP informed */
 		if (need_static)
 			need_static = update_static_battery_info();
@@ -722,11 +767,15 @@ wait_for_it:
 		notify_host_of_low_battery();
 
 		/* And the EC console */
-		if (!(curr.batt.flags & BATT_FLAG_BAD_STATE_OF_CHARGE) &&
-		    curr.batt.state_of_charge != prev_charge) {
+		is_full = calc_is_full();
+		if ((!(curr.batt.flags & BATT_FLAG_BAD_STATE_OF_CHARGE) &&
+		    curr.batt.state_of_charge != prev_charge) ||
+		    (is_full != prev_full)) {
 			show_charging_progress();
 			prev_charge = curr.batt.state_of_charge;
+			hook_notify(HOOK_BATTERY_SOC_CHANGE);
 		}
+		prev_full = is_full;
 
 		/* Turn charger off if it's not needed */
 		if (curr.state == ST_IDLE || curr.state == ST_DISCHARGE) {
@@ -766,6 +815,10 @@ wait_for_it:
 				charge_request(curr.requested_voltage,
 					       curr.requested_current);
 			}
+		} else {
+			charge_request(
+				charger_closest_voltage(
+				  curr.batt.voltage + info->voltage_step), -1);
 		}
 
 		/* How long to sleep? */
@@ -816,9 +869,18 @@ int charge_prevent_power_on(void)
 {
 	int prevent_power_on = 0;
 #ifdef CONFIG_CHARGER_MIN_BAT_PCT_FOR_POWER_ON
+	struct batt_params params;
+	struct batt_params *current_batt_params = &curr.batt;
+
+	/* If battery params seem uninitialized then retrieve them */
+	if (current_batt_params->is_present == BP_NOT_SURE) {
+		battery_get_params(&params);
+		current_batt_params = &params;
+	}
 	/* Require a minimum battery level to power on */
-	if (curr.batt.is_present == BP_NO ||
-	    curr.batt.state_of_charge < CONFIG_CHARGER_MIN_BAT_PCT_FOR_POWER_ON)
+	if (current_batt_params->is_present != BP_YES ||
+	    current_batt_params->state_of_charge <
+	    CONFIG_CHARGER_MIN_BAT_PCT_FOR_POWER_ON)
 		prevent_power_on = 1;
 #endif
 	/* Factory override: Always allow power on if WP is disabled */
@@ -868,7 +930,7 @@ int charge_get_percent(void)
 	 * to the battery, that'll be zero, which is probably as good as
 	 * anything.
 	 */
-	return curr.batt.state_of_charge;
+	return is_full ? 100 : curr.batt.state_of_charge;
 }
 
 int charge_temp_sensor_get_val(int idx, int *temp_ptr)
@@ -883,6 +945,15 @@ int charge_temp_sensor_get_val(int idx, int *temp_ptr)
 
 int charge_set_input_current_limit(int ma)
 {
+	/*
+	 * If battery is not present and we are not locked, then allow system
+	 * to pull as much input current as needed. Yes, we might overcurrent
+	 * the charger but this is no worse then browning out due to
+	 * insufficient input current.
+	 */
+	if (curr.batt.is_present != BP_YES && !system_is_locked())
+		return EC_SUCCESS;
+
 	curr.desired_input_current = ma;
 	return charger_set_input_current(ma);
 }

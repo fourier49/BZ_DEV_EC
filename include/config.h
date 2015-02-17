@@ -126,6 +126,18 @@
 #undef CONFIG_BATTERY_SMART
 
 /*
+ * Critical battery shutdown timeout (seconds)
+ *
+ * If the battery is at extremely low charge (and discharging) or extremely
+ * high temperature, the EC will shut itself down. This defines the timeout
+ * period in seconds between the critical condition being detected and the
+ * EC shutting itself down. Note that if the critical condition is corrected
+ * before the timeout expiration, the EC will not shut itself down.
+ *
+ */
+#define CONFIG_BATTERY_CRITICAL_SHUTDOWN_TIMEOUT 30
+
+/*
  * Support battery cut-off as host command and console command.
  *
  * Once defined, you have to implement a board_cut_off_battery() function
@@ -300,6 +312,13 @@
 #define CONFIG_CHIPSET_HAS_PP5000
 
 /*****************************************************************************/
+/*
+ * Chip config for clock circuitry
+ *	define = crystal / undef = oscillator
+ */
+#undef CONFIG_CLOCK_CRYSTAL
+
+/*****************************************************************************/
 /* PMIC config */
 
 /* Support firmware long press power-off timer */
@@ -320,11 +339,15 @@
 #undef CONFIG_CMD_COMXTEST
 #undef CONFIG_CMD_ECTEMP
 #undef CONFIG_CMD_FLASH
+#undef CONFIG_CMD_FORCETIME
 #undef CONFIG_CMD_GSV
+#define CONFIG_CMD_HASH
 #undef CONFIG_CMD_HOSTCMD
 #undef CONFIG_CMD_ILIM
 #undef CONFIG_CMD_JUMPTAGS
 #define CONFIG_CMD_PD
+#undef CONFIG_CMD_PD_DEV_DUMP_INFO
+#undef CONFIG_CMD_PD_FLASH
 #undef CONFIG_CMD_PLL
 #undef CONFIG_CMD_PMU
 #define CONFIG_CMD_POWER_AP
@@ -336,6 +359,8 @@
 #undef CONFIG_CMD_SPI_FLASH
 #undef CONFIG_CMD_STACKOVERFLOW
 #undef CONFIG_CMD_TASKREADY
+#define CONFIG_CMD_TYPEC
+#undef CONFIG_CMD_USB_PD_PE
 
 /*****************************************************************************/
 
@@ -525,6 +550,13 @@
 #undef CONFIG_FLASH_BASE
 #undef CONFIG_FLASH_ERASED_VALUE32
 #undef CONFIG_FLASH_ERASE_SIZE
+
+/*
+ * Flash is directly mapped into the EC's address space.  If this is not
+ * defined, the flash driver must implement flash_physical_read().
+ */
+#define CONFIG_FLASH_MAPPED
+
 #undef CONFIG_FLASH_PHYSICAL_SIZE
 #undef CONFIG_FLASH_PROTECT_NEXT_BOOT
 #undef CONFIG_FLASH_SIZE
@@ -787,6 +819,18 @@
 
 /* Support common LED interface */
 #undef CONFIG_LED_COMMON
+
+/* Standard LED behavior according to spec given that we have a red-green
+ * bicolor led for charging and one power led
+ */
+#undef CONFIG_LED_POLICY_STD
+
+/*
+ * LEDs for LED_POLICY STD may be inverted.  In this case they are active low
+ * and the GPIO names will be GPIO_LED..._L.
+ */
+#undef CONFIG_LED_BAT_ACTIVE_LOW
+#undef CONFIG_LED_POWER_ACTIVE_LOW
 
 /* Support for LED driver chip(s) */
 #undef CONFIG_LED_DRIVER_DS2413  /* Maxim DS2413, on one-wire interface */
@@ -1120,17 +1164,17 @@
 /* Include all USB Power Delivery modules */
 #undef CONFIG_USB_POWER_DELIVERY
 
-/* Alternative configuration keeping only the TX part of PHY */
-#undef CONFIG_USB_PD_TX_PHY_ONLY
-
-/* Default state of PD communication enabled flag */
-#define CONFIG_USB_PD_COMM_ENABLED 1
-
 /* Support for USB PD alternate mode */
 #undef CONFIG_USB_PD_ALT_MODE
 
 /* Support for USB PD alternate mode of Downward Facing Port */
 #undef CONFIG_USB_PD_ALT_MODE_DFP
+
+/* Check if max voltage request is allowed before each request */
+#undef CONIFG_USB_PD_CHECK_MAX_REQUEST_ALLOWED
+
+/* Default state of PD communication enabled flag */
+#define CONFIG_USB_PD_COMM_ENABLED 1
 
 /* Respond to custom vendor-defined messages over PD */
 #undef CONFIG_USB_PD_CUSTOM_VDM
@@ -1154,6 +1198,12 @@
 /* Define if using internal comparator for PD receive */
 #undef CONFIG_USB_PD_INTERNAL_COMP
 
+/* Record main PD events in a circular buffer */
+#undef CONFIG_USB_PD_LOGGING
+
+/* The size in bytes of the FIFO used for PD events logging */
+#undef CONFIG_USB_PD_LOG_SIZE
+
 /* Define if USB-PD device has no way of detecting USB VBUS */
 #undef CONFIG_USB_PD_NO_VBUS_DETECT
 
@@ -1163,11 +1213,14 @@
 /* Use comparator module for PD RX interrupt */
 #define CONFIG_USB_PD_RX_COMP_IRQ
 
-/* USB PD transmit uses SPI master */
-#undef CONFIG_USB_PD_TX_USES_SPI_MASTER
+/* Alternative configuration keeping only the TX part of PHY */
+#undef CONFIG_USB_PD_TX_PHY_ONLY
 
 /* Support for USB type-c superspeed mux */
 #undef CONFIG_USBC_SS_MUX
+
+/* Support v1.1 type-C connection state machine */
+#undef CONFIG_USBC_BACKWARDS_COMPATIBLE_DFP
 
 /* Support for USB type-c vconn. Not needed for captive cables. */
 #undef CONFIG_USBC_VCONN
@@ -1177,15 +1230,6 @@
 
 /* USB Device version of product */
 #undef CONFIG_USB_BCD_DEV
-
-/*****************************************************************************/
-/* USB interfaces config */
-
-/* USB mass storage interface */
-#undef CONFIG_USB_MS
-
-/* USB mass storage local buffer size */
-#undef CONFIG_USB_MS_BUFFER_SIZE
 
 /*****************************************************************************/
 
@@ -1300,6 +1344,12 @@
  */
 #undef CONFIG_WP_ACTIVE_HIGH
 
+/*
+ * The write protect signal is always asserted,
+ * independantly of the GPIO existence or current value.
+ */
+#undef CONFIG_WP_ALWAYS
+
 /*****************************************************************************/
 /*
  * Include board and core configs, since those hold the CONFIG_ constants for a
@@ -1330,6 +1380,7 @@
 
 #ifndef HAS_TASK_CHIPSET
 #undef CONFIG_CHIPSET_BAYTRAIL
+#undef CONFIG_CHIPSET_BRASWELL
 #undef CONFIG_CHIPSET_GAIA
 #undef CONFIG_CHIPSET_HASWELL
 #undef CONFIG_CHIPSET_IVYBRIDGE

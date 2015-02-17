@@ -6,6 +6,7 @@
 /* X86 chipset power control module for Chrome EC */
 
 #include "battery.h"
+#include "charge_state.h"
 #include "chipset.h"
 #include "common.h"
 #include "console.h"
@@ -174,18 +175,6 @@ enum power_state power_chipset_init(void)
 	return POWER_G3;
 }
 
-static void update_touchscreen(void)
-{
-	/*
-	 * If the lid is closed; put the touchscreen in reset to save power.
-	 * If the lid is open, take it out of reset so it can wake the
-	 * processor (although just opening the lid should do that anyway, so
-	 * we don't have to worry about it staying on while the AP is off).
-	 */
-	gpio_set_level(GPIO_TOUCHSCREEN_RESET_L, lid_is_open());
-}
-DECLARE_HOOK(HOOK_LID_CHANGE, update_touchscreen, HOOK_PRIO_DEFAULT);
-
 enum power_state power_handle_state(enum power_state state)
 {
 	struct batt_params batt;
@@ -195,6 +184,7 @@ enum power_state power_handle_state(enum power_state state)
 		break;
 
 	case POWER_S5:
+
 		while ((power_get_signals() & IN_PCH_SLP_S5_DEASSERTED) == 0) {
 			if (task_wait_event(SECOND*4) == TASK_EVENT_TIMER) {
 				CPRINTS("timeout waiting for S5 exit");
@@ -235,6 +225,14 @@ enum power_state power_handle_state(enum power_state state)
 		break;
 
 	case POWER_G3S5:
+		/* Return to G3 if battery level is too low */
+		if (charge_want_shutdown() ||
+		    charge_prevent_power_on()) {
+			CPRINTS("power-up inhibited");
+			chipset_force_g3();
+			return POWER_G3;
+		}
+
 		/* Enable 3.3V DSW */
 		gpio_set_level(GPIO_PP3300_DSW_EN, 1);
 
@@ -256,6 +254,17 @@ enum power_state power_handle_state(enum power_state state)
 				chipset_force_g3();
 				return POWER_G3;
 			}
+		}
+
+		/*
+		 * TODO(crosbug.com/p/31583): Temporary hack to allow booting
+		 * without battery. If battery is not present here, then delay
+		 * to give time for PD MCU to negotiate to 20V.
+		 */
+		battery_get_params(&batt);
+		if (batt.is_present != BP_YES && !system_is_locked()) {
+			CPRINTS("Attempting boot w/o battery, adding delay");
+			msleep(500);
 		}
 
 		/* Assert DPWROK */
@@ -294,17 +303,6 @@ enum power_state power_handle_state(enum power_state state)
 		return POWER_S5;
 
 	case POWER_S5S3:
-		/*
-		 * TODO(crosbug.com/p/31583): Temporary hack to allow booting
-		 * without battery. If battery is not present here, then delay
-		 * to give time for PD MCU to negotiate to 20V.
-		 */
-		battery_get_params(&batt);
-		if (batt.is_present != BP_YES && !system_is_locked()) {
-			CPRINTS("Attempting boot w/o battery, adding delay");
-			msleep(500);
-		}
-
 		/* Turn on power to RAM */
 		gpio_set_level(GPIO_PP1800_EN, 1);
 		gpio_set_level(GPIO_PP1200_EN, 1);

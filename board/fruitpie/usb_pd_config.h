@@ -132,6 +132,20 @@ static inline void pd_set_host_mode(int port, int enable)
 	gpio_set_level(GPIO_CC_HOST, enable);
 }
 
+/**
+ * Initialize various GPIOs and interfaces to safe state at start of pd_task.
+ *
+ * These include:
+ *   VCONNs disabled.
+ *
+ * @param port USB-C port number
+ */
+static inline void pd_config_init(int port)
+{
+	gpio_set_level(GPIO_VCONN1_EN, 0);
+	gpio_set_level(GPIO_VCONN2_EN, 0);
+}
+
 static inline int pd_adc_read(int port, int cc)
 {
 	if (cc == 0)
@@ -162,7 +176,8 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
 
 /* delay necessary for the voltage transition on the power supply */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 50000 /* us */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  50000 /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 50000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 1000

@@ -8,6 +8,8 @@
 #include "adc_chip.h"
 #include "battery.h"
 #include "case_closed_debug.h"
+#include "charge_manager.h"
+#include "charge_state.h"
 #include "charger.h"
 #include "common.h"
 #include "console.h"
@@ -29,15 +31,121 @@
 #include "util.h"
 #include "pi3usb9281.h"
 
+#define CPRINTS(format, args...) cprints(CC_USBCHARGE, format, ## args)
+
+static void vbus_log(void)
+{
+	CPRINTS("VBUS %d", gpio_get_level(GPIO_CHGR_ACOK));
+}
+DECLARE_DEFERRED(vbus_log);
+
 void vbus_evt(enum gpio_signal signal)
 {
-	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
-	task_wake(TASK_ID_PD);
+	hook_call_deferred(vbus_log, 0);
+	if (task_start_called())
+		task_wake(TASK_ID_PD);
 }
 
-void unhandled_evt(enum gpio_signal signal)
+/* Wait 200ms after a charger is detected to debounce pin contact order */
+#define USB_CHG_DEBOUNCE_DELAY_MS 200
+/*
+ * Wait 100ms after reset, before re-enabling attach interrupt, so that the
+ * spurious attach interrupt from certain ports is ignored.
+ */
+#define USB_CHG_RESET_DELAY_MS 100
+
+void usb_charger_task(void)
 {
-	ccprintf("Unhandled INT %d,%d!\n", signal, gpio_get_level(signal));
+	int device_type, charger_status;
+	struct charge_port_info charge;
+	int type;
+	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
+
+	while (1) {
+		/* Read interrupt register to clear */
+		pi3usb9281_get_interrupts(0);
+
+		/* Set device type */
+		device_type = pi3usb9281_get_device_type(0);
+		charger_status = pi3usb9281_get_charger_status(0);
+
+		/* Debounce pin plug order if we detect a charger */
+		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
+			msleep(USB_CHG_DEBOUNCE_DELAY_MS);
+
+			/* Trigger chip reset to refresh detection registers */
+			pi3usb9281_reset(0);
+			/* Clear possible disconnect interrupt */
+			pi3usb9281_get_interrupts(0);
+			/* Mask attach interrupt */
+			pi3usb9281_set_interrupt_mask(0,
+						      0xff &
+						      ~PI3USB9281_INT_ATTACH);
+			/* Re-enable interrupts */
+			pi3usb9281_enable_interrupts(0);
+			msleep(USB_CHG_RESET_DELAY_MS);
+
+			/* Clear possible attach interrupt */
+			pi3usb9281_get_interrupts(0);
+			/* Re-enable attach interrupt */
+			pi3usb9281_set_interrupt_mask(0, 0xff);
+
+			/* Re-read ID registers */
+			device_type = pi3usb9281_get_device_type(0);
+			charger_status = pi3usb9281_get_charger_status(0);
+		}
+
+		if (PI3USB9281_CHG_STATUS_ANY(charger_status))
+			type = CHARGE_SUPPLIER_PROPRIETARY;
+		else if (device_type & PI3USB9281_TYPE_CDP)
+			type = CHARGE_SUPPLIER_BC12_CDP;
+		else if (device_type & PI3USB9281_TYPE_DCP)
+			type = CHARGE_SUPPLIER_BC12_DCP;
+		else if (device_type & PI3USB9281_TYPE_SDP)
+			type = CHARGE_SUPPLIER_BC12_SDP;
+		else
+			type = CHARGE_SUPPLIER_OTHER;
+
+		/* Attachment: decode + update available charge */
+		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
+			charge.current = pi3usb9281_get_ilim(device_type,
+							     charger_status);
+			charge_manager_update_charge(type, 0, &charge);
+		} else { /* Detachment: update available charge to 0 */
+			charge.current = 0;
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_PROPRIETARY,
+						0,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_CDP,
+						0,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_DCP,
+						0,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_SDP,
+						0,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_OTHER,
+						0,
+						&charge);
+		}
+
+		/* notify host of power info change */
+		/* pd_send_host_event(PD_EVENT_POWER_CHANGE); */
+
+		/* Wait for interrupt */
+		task_wait_event(-1);
+	}
+}
+
+void usb_evt(enum gpio_signal signal)
+{
+	task_wake(TASK_ID_USB_CHG);
 }
 
 #include "gpio_list.h"
@@ -55,6 +163,24 @@ BUILD_ASSERT(ARRAY_SIZE(usb_strings) == USB_STR_COUNT);
 /* Initialize board. */
 static void board_init(void)
 {
+	struct charge_port_info charge;
+
+	/* Initialize all pericom charge suppliers to 0 */
+	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
+	charge.current = 0;
+	charge_manager_update_charge(CHARGE_SUPPLIER_PROPRIETARY,
+				     0,
+				     &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_CDP, 0, &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_DCP, 0, &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_SDP, 0, &charge);
+	charge_manager_update_charge(CHARGE_SUPPLIER_OTHER, 0, &charge);
+
+	/* Enable pericom BC1.2 interrupts. */
+	gpio_enable_interrupt(GPIO_USBC_BC12_INT_L);
+	pi3usb9281_set_interrupt_mask(0, 0xff);
+	pi3usb9281_enable_interrupts(0);
+
 	/*
 	 * Determine recovery mode is requested by the power, volup, and
 	 * voldown buttons being pressed.
@@ -95,6 +221,18 @@ const struct adc_t adc_channels[] = {
 	[ADC_IBAT] = {"IBAT", 37500, 4096, 0, STM32_AIN(13)},
 };
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
+
+/* Charge supplier priority: lower number indicates higher priority. */
+const int supplier_priority[] = {
+	[CHARGE_SUPPLIER_PD] = 0,
+	[CHARGE_SUPPLIER_TYPEC] = 1,
+	[CHARGE_SUPPLIER_PROPRIETARY] = 1,
+	[CHARGE_SUPPLIER_BC12_DCP] = 1,
+	[CHARGE_SUPPLIER_BC12_CDP] = 2,
+	[CHARGE_SUPPLIER_BC12_SDP] = 3,
+	[CHARGE_SUPPLIER_OTHER] = 3
+};
+BUILD_ASSERT(ARRAY_SIZE(supplier_priority) == CHARGE_SUPPLIER_COUNT);
 
 /* I2C ports */
 const struct i2c_port_t i2c_ports[] = {
@@ -167,34 +305,58 @@ int extpower_is_present(void)
 	return gpio_get_level(GPIO_CHGR_ACOK);
 }
 
-/*
- * Disconnect the USB lines from the AP, this enables manual control of the
- * Pericom polarity switch and disconnects the USB 2.0 lines
- */
-void ccd_board_connect(void)
-{
-	pi3usb9281_set_pins(0, 0x00);
-	pi3usb9281_set_switch_manual(0, 0);
-}
-
-/*
- * Reconnect the USB lines to the AP re-enabling automatic switching
- */
-void ccd_board_disconnect(void)
-{
-	pi3usb9281_set_switch_manual(0, 1);
-}
-
 void usb_board_connect(void)
 {
-	/*
-	 * TODO(robotboy): Enable DP pullup for Proto 3, Proto 2 doesn't have
-	 * the DP pullup, so case closed debug will only work on a Proto 2 if
-	 * the board is reworked, and this function is updated.
-	 */
+	gpio_set_level(GPIO_USB_PU_EN_L, 0);
 }
 
 void usb_board_disconnect(void)
 {
-	/* TODO(robotboy): Disable DP pullup for Proto 3 */
+	gpio_set_level(GPIO_USB_PU_EN_L, 1);
+}
+
+/* Charge manager callback function, called on delayed override timeout */
+void board_charge_manager_override_timeout(void)
+{
+	/* TODO: Implement me! */
+}
+DECLARE_DEFERRED(board_charge_manager_override_timeout);
+
+/**
+ * Set active charge port -- only one port can be active at a time.
+ *
+ * @param charge_port   Charge port to enable.
+ *
+ * Returns EC_SUCCESS if charge port is accepted and made active,
+ * EC_ERROR_* otherwise.
+ */
+int board_set_active_charge_port(int charge_port)
+{
+	int ret = EC_SUCCESS;
+
+	if (charge_port >= 0 && charge_port < PD_PORT_COUNT &&
+	    pd_get_role(charge_port) != PD_ROLE_SINK) {
+		CPRINTS("Port %d is not a sink, skipping enable", charge_port);
+		charge_port = CHARGE_PORT_NONE;
+		ret = EC_ERROR_INVAL;
+	}
+	if (charge_port == CHARGE_PORT_NONE) {
+		/* Disable charging */
+		charge_set_input_current_limit(0);
+	}
+
+	return ret;
+}
+
+/**
+ * Set the charge limit based upon desired maximum.
+ *
+ * @param charge_ma     Desired charge limit (mA).
+ */
+void board_set_charge_limit(int charge_ma)
+{
+	int rv = charge_set_input_current_limit(MAX(charge_ma,
+					CONFIG_CHARGER_INPUT_CURRENT));
+	if (rv < 0)
+		CPRINTS("Failed to set input current limit for PD");
 }

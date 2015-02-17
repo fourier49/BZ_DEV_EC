@@ -42,6 +42,12 @@ void pd_set_input_current_limit(int port, uint32_t max_ma,
 		CPRINTS("Failed to set input current limit for PD");
 }
 
+int pd_is_valid_input_voltage(int mv)
+{
+	/* Any voltage less than the max is allowed */
+	return 1;
+}
+
 int pd_check_requested_voltage(uint32_t rdo)
 {
 	int max_ma = rdo & 0x3FF;
@@ -105,8 +111,11 @@ int pd_check_data_swap(int port, int data_role)
 	return 1;
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 }
 
@@ -116,12 +125,11 @@ void pd_execute_data_swap(int port, int data_role)
 }
 
 /* ----------------- Vendor Defined Messages ------------------ */
-static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 			 uint32_t **rpayload)
 {
 	int cmd = PD_VDO_CMD(payload[0]);
 	uint16_t dev_id = 0;
-	CPRINTF("VDM/%d [%d] %08x\n", cnt, cmd, payload[0]);
 
 	/* make sure we have some payload */
 	if (cnt == 0)
@@ -160,12 +168,4 @@ static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 	}
 
 	return 0;
-}
-
-int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
-{
-	if (PD_VDO_SVDM(payload[0]))
-		return pd_svdm(port, cnt, payload, rpayload);
-	else
-		return pd_custom_vdm(port, cnt, payload, rpayload);
 }

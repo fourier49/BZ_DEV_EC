@@ -55,6 +55,9 @@ static struct p_state {
 	/* It's either charging or discharging. */
 	int battery_is_charging;
 
+	/* Is power-on prevented due to battery level? */
+	int battery_is_power_on_prevented;
+
 	/* Pattern variables for state S0. */
 	uint16_t w0;				/* primary phase */
 	uint8_t ramp;				/* ramp-in for S3->S0 */
@@ -75,12 +78,14 @@ static const struct lightbar_params_v1 default_params = {
 	.s3_sleep_for = 5 * SECOND,		/* between checks */
 	.s3_ramp_up = 2500,
 	.s3_ramp_down = 10000,
+	.s5_ramp_up = 2500,
+	.s5_ramp_down = 10000,
 	.tap_tick_delay = 5000,			/* oscillation step time */
 	.tap_gate_delay = 200 * MSEC,		/* segment gating delay */
 	.tap_display_time = 3 * SECOND,		/* total sequence time */
 
-	.tap_pct_red = 10,			/* below this is red */
-	.tap_pct_green = 97,			/* above this is green */
+	.tap_pct_red = 14,			/* below this is red */
+	.tap_pct_green = 94,			/* above this is green */
 	.tap_seg_min_on = 35,		        /* min intensity (%) for "on" */
 	.tap_seg_max_on = 100,			/* max intensity (%) for "on" */
 	.tap_seg_osc = 50,			/* amplitude for charging osc */
@@ -103,6 +108,7 @@ static const struct lightbar_params_v1 default_params = {
 		{ 5, 0xff, 0xff, 0xff },       /* battery: 0 = red, else off */
 		{ 0xff, 0xff, 0xff, 0xff }     /* AC: do nothing */
 	},
+	.s5_idx = 5,			       /* flash red */
 	.color = {
 		/*
 		 * These values have been optically calibrated for the
@@ -187,6 +193,7 @@ static void get_battery_level(void)
 #ifdef HAS_TASK_CHARGER
 	st.battery_percent = pct = charge_get_percent();
 	st.battery_is_charging = (PWR_STATE_DISCHARGE != charge_get_state());
+	st.battery_is_power_on_prevented = charge_prevent_power_on();
 #endif
 
 	/* Find the new battery level */
@@ -647,13 +654,76 @@ static uint32_t sequence_S3S5(void)
 	return LIGHTBAR_S5;
 }
 
-/* CPU is off. The lightbar loses power when the CPU is in S5, so there's
- * nothing to do. We'll just wait here until the state changes. */
+/* Pulse S5 color to indicate that the battery is so critically low that it
+ * must charge first before the system can power on. */
+static uint32_t pulse_s5_color(void)
+{
+	int r, g, b;
+	int f;
+	int w;
+	struct rgb_s *color = &st.p.color[st.p.s5_idx];
+
+	for (w = 0; w < 128; w += 2) {
+		f = cycle_010(w);
+		r = color->r * f / FP_SCALE;
+		g = color->g * f / FP_SCALE;
+		b = color->b * f / FP_SCALE;
+		lb_set_rgb(NUM_LEDS, r, g, b);
+		WAIT_OR_RET(st.p.s5_ramp_up);
+	}
+	for (w = 128; w <= 256; w++) {
+		f = cycle_010(w);
+		r = color->r * f / FP_SCALE;
+		g = color->g * f / FP_SCALE;
+		b = color->b * f / FP_SCALE;
+		lb_set_rgb(NUM_LEDS, r, g, b);
+		WAIT_OR_RET(st.p.s5_ramp_down);
+	}
+
+	return 0;
+}
+
+/* CPU is off. Pulse the lightbar if a charger is attached and the battery is
+ * so low that the system cannot power on. Otherwise, the lightbar loses power
+ * when the CPU is in S5, so there's nothing to do. We'll just wait here until
+ * the state changes. */
 static uint32_t sequence_S5(void)
 {
+	int initialized = 0;
+	uint32_t res = 0;
+
+	while (1) {
+		get_battery_level();
+		if (!st.battery_is_power_on_prevented ||
+		    !st.battery_is_charging)
+			break;
+
+		if (!initialized) {
+#ifdef CONFIG_LIGHTBAR_POWER_RAILS
+			/* Request that lightbar power rails be turned on. */
+			if (lb_power(1)) {
+				lb_init();
+				lb_set_rgb(NUM_LEDS, 0, 0, 0);
+			}
+#endif
+			lb_on();
+			initialized = 1;
+		}
+
+		res = pulse_s5_color();
+		if (res)
+			break;
+	}
+
+#ifdef CONFIG_LIGHTBAR_POWER_RAILS
+	if (initialized)
+		/* Suggest that the lightbar power rails can be shut down. */
+		lb_power(0);
+#endif
 	lb_off();
-	WAIT_OR_RET(-1);
-	return 0;
+	if (!res)
+		WAIT_OR_RET(-1);
+	return res;
 }
 
 /* The AP is going to poke at the lightbar directly, so we don't want the EC
@@ -876,8 +946,9 @@ static uint32_t sequence_TAP_inner(int dir)
 
 			f_mult = f_mult * gate[i] / FP_SCALE;
 
-			/* Pulse when charging */
-			if (st.battery_is_charging) {
+			/* Pulse when charging and not yet full */
+			if (st.battery_is_charging &&
+			    st.battery_percent <= st.p.tap_pct_green) {
 				int scale = (FP_SCALE -
 					     f_osc * cycle_010(w++) / FP_SCALE);
 				f_mult = f_mult * scale / FP_SCALE;
@@ -906,18 +977,22 @@ static int force_dir = -1;
 /* Return 0 (left or none) or 1 (right) */
 static int get_tap_direction(void)
 {
+	static int last_dir;
 	int dir = 0;
 
 	if (force_dir >= 0)
 		dir = force_dir;
 #ifdef HAS_TASK_PDCMD
 	else
-		pd_exchange_status(&dir);
+		dir = pd_get_active_charge_port();
 #endif
-	if (dir != 1)
+	if (dir < 0)
+		dir = last_dir;
+	else if (dir != 1)
 		dir = 0;
 
 	CPRINTS("LB tap direction %d", dir);
+	last_dir = dir;
 	return dir;
 }
 
@@ -1496,21 +1571,26 @@ void lightbar_sequence_f(enum lightbar_sequence num, const char *f)
 /****************************************************************************/
 /* Get notifications from other parts of the system */
 
+static uint8_t manual_suspend_control;
+
 static void lightbar_startup(void)
 {
+	manual_suspend_control = 0;
 	lightbar_sequence(LIGHTBAR_S5S3);
 }
 DECLARE_HOOK(HOOK_CHIPSET_STARTUP, lightbar_startup, HOOK_PRIO_DEFAULT);
 
 static void lightbar_resume(void)
 {
-	lightbar_sequence(LIGHTBAR_S3S0);
+	if (!manual_suspend_control)
+		lightbar_sequence(LIGHTBAR_S3S0);
 }
 DECLARE_HOOK(HOOK_CHIPSET_RESUME, lightbar_resume, HOOK_PRIO_DEFAULT);
 
 static void lightbar_suspend(void)
 {
-	lightbar_sequence(LIGHTBAR_S0S3);
+	if (!manual_suspend_control)
+		lightbar_sequence(LIGHTBAR_S0S3);
 }
 DECLARE_HOOK(HOOK_CHIPSET_SUSPEND, lightbar_suspend, HOOK_PRIO_DEFAULT);
 
@@ -1611,6 +1691,18 @@ static int lpc_cmd_lightbar(struct host_cmd_handler_args *args)
 		out->version.num = LIGHTBAR_IMPLEMENTATION_VERSION;
 		out->version.flags = LIGHTBAR_IMPLEMENTATION_FLAGS;
 		args->response_size = sizeof(out->version);
+		break;
+	case LIGHTBAR_CMD_MANUAL_SUSPEND_CTRL:
+		CPRINTS("LB_manual_suspend_ctrl");
+		manual_suspend_control = in->manual_suspend_ctrl.enable;
+		break;
+	case LIGHTBAR_CMD_SUSPEND:
+		CPRINTS("LB_suspend");
+		lightbar_sequence(LIGHTBAR_S0S3);
+		break;
+	case LIGHTBAR_CMD_RESUME:
+		CPRINTS("LB_resume");
+		lightbar_sequence(LIGHTBAR_S3S0);
 		break;
 	default:
 		CPRINTS("LB bad cmd 0x%x", in->cmd);

@@ -123,6 +123,10 @@ SECTIONS
         KEEP(*(.rodata.HOOK_CHARGE_STATE_CHANGE))
         __hooks_charge_state_change_end = .;
 
+        __hooks_battery_soc_change = .;
+        KEEP(*(.rodata.HOOK_BATTERY_SOC_CHANGE))
+        __hooks_battery_soc_change_end = .;
+
         __hooks_tick = .;
         KEEP(*(.rodata.HOOK_TICK))
         __hooks_tick_end = .;
@@ -234,7 +238,7 @@ SECTIONS
      * explicit ASSERT afterwards will cause the linker to abort if we use too
      * much. */
     __hey_flash_used = LOADADDR(.data) + SIZEOF(.data) - FW_OFF(SECTION);
-    ASSERT(FW_SIZE(SECTION) >
+    ASSERT(FW_SIZE(SECTION) >=
                  (LOADADDR(.data) + SIZEOF(.data) - FW_OFF(SECTION)),
                  "No room left in the flash")
 

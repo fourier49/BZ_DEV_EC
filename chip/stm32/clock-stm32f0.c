@@ -156,7 +156,7 @@ void set_rtc_alarm(uint32_t delay_s, uint32_t delay_us,
 	/* Calculate alarm time */
 	alarm_sec = rtc_to_sec(*rtc) + delay_s;
 	alarm_us = (RTC_PREDIV_S - *rtcss) * US_PER_RTC_TICK + delay_us;
-	alarm_sec = (alarm_sec + alarm_us / SECOND) % 86400;
+	alarm_sec = alarm_sec + alarm_us / SECOND;
 	alarm_us = alarm_us % 1000000;
 
 	/* Set alarm time */
@@ -416,6 +416,19 @@ void __idle(void)
 int clock_get_freq(void)
 {
 	return CPU_CLOCK;
+}
+
+void clock_wait_bus_cycles(enum bus_type bus, uint32_t cycles)
+{
+	volatile uint32_t dummy __attribute__((unused));
+
+	if (bus == BUS_AHB) {
+		while (cycles--)
+			dummy = STM32_DMA1_REGS->isr;
+	} else { /* APB */
+		while (cycles--)
+			dummy = STM32_USART_BRR(STM32_USART1_BASE);
+	}
 }
 
 void clock_enable_module(enum module_id module, int enable)

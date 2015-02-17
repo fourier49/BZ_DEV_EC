@@ -3,7 +3,7 @@
  * found in the LICENSE file.
  */
 
-#include "charge_state.h"
+#include "charge_manager.h"
 #include "common.h"
 #include "console.h"
 #include "gpio.h"
@@ -35,10 +35,25 @@ const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 void pd_set_input_current_limit(int port, uint32_t max_ma,
 				uint32_t supply_voltage)
 {
-	int rv = charge_set_input_current_limit(MAX(max_ma,
-					CONFIG_CHARGER_INPUT_CURRENT));
-	if (rv < 0)
-		CPRINTS("Failed to set input current limit for PD");
+	struct charge_port_info charge;
+	charge.current = max_ma;
+	charge.voltage = supply_voltage;
+	charge_manager_update_charge(CHARGE_SUPPLIER_PD, port, &charge);
+}
+
+void typec_set_input_current_limit(int port, uint32_t max_ma,
+				   uint32_t supply_voltage)
+{
+	struct charge_port_info charge;
+	charge.current = max_ma;
+	charge.voltage = supply_voltage;
+	charge_manager_update_charge(CHARGE_SUPPLIER_TYPEC, port, &charge);
+}
+
+int pd_is_valid_input_voltage(int mv)
+{
+	/* Any voltage less than the max is allowed */
+	return 1;
 }
 
 int pd_check_requested_voltage(uint32_t rdo)
@@ -104,12 +119,21 @@ int pd_check_data_swap(int port, int data_role)
 	return 1;
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 }
 
 void pd_execute_data_swap(int port, int data_role)
 {
 	/* TODO: what do we need to do to change host controller data role? */
+}
+
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
+{
+	return 0;
 }

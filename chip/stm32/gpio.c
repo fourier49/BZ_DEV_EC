@@ -5,6 +5,7 @@
 
 /* GPIO module for Chrome EC */
 
+#include "clock.h"
 #include "common.h"
 #include "console.h"
 #include "gpio.h"
@@ -27,6 +28,9 @@ void gpio_pre_init(void)
 
 	/* Required to configure external IRQ lines (SYSCFG_EXTICRn) */
 	STM32_RCC_APB2ENR |= 1 << 0;
+
+	/* Delay 1 APB clock cycle after the clock is enabled */
+	clock_wait_bus_cycles(BUS_APB, 1);
 
 	if (!is_warm)
 		gpio_enable_clocks();
@@ -124,3 +128,8 @@ void gpio_interrupt(void)
 			g->irq_handler(g - gpio_list);
 	}
 }
+#ifdef CHIP_FAMILY_STM32F0
+DECLARE_IRQ(STM32_IRQ_EXTI0_1, gpio_interrupt, 1);
+DECLARE_IRQ(STM32_IRQ_EXTI2_3, gpio_interrupt, 1);
+DECLARE_IRQ(STM32_IRQ_EXTI4_15, gpio_interrupt, 1);
+#endif

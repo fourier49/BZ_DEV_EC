@@ -6,6 +6,8 @@
 #ifndef __CHARGE_MANAGER_H
 #define __CHARGE_MANAGER_H
 
+#include "common.h"
+
 /* Charge port that indicates no active port */
 #define CHARGE_SUPPLIER_NONE -1
 #define CHARGE_PORT_NONE -1
@@ -22,18 +24,34 @@ struct charge_port_info {
 };
 
 /* Called by charging tasks to update their available charge */
-void charge_manager_update(int supplier,
-			   int charge_port,
-			   struct charge_port_info *charge);
+void charge_manager_update_charge(int supplier,
+				  int port,
+				  struct charge_port_info *charge);
+
+/* Partner port dualrole capabilities */
+enum dualrole_capabilities {
+	CAP_UNKNOWN,
+	CAP_DUALROLE,
+	CAP_DEDICATED,
+};
+
+/* Called by charging tasks to indicate partner dualrole capability change */
+void charge_manager_update_dualrole(int port, enum dualrole_capabilities cap);
 
 /* Update charge ceiling for a given port */
 void charge_manager_set_ceil(int port, int ceil);
 
 /* Select an 'override port', which is always the preferred charge port */
 int charge_manager_set_override(int port);
+int charge_manager_get_override(void);
 
 /* Returns the current active charge port, as determined by charge manager */
 int charge_manager_get_active_charge_port(void);
+
+#ifdef CONFIG_USB_PD_LOGGING
+/* Save power state log entry for the given port */
+void charge_manager_save_log(int port);
+#endif
 
 /* Board-level callback functions */
 

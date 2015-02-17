@@ -25,6 +25,12 @@ const uint32_t pd_snk_pdo[] = {
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
+int pd_is_valid_input_voltage(int mv)
+{
+	/* Any voltage less than the max is allowed */
+	return 1;
+}
+
 int pd_check_requested_voltage(uint32_t rdo)
 {
 	int max_ma = rdo & 0x3FF;
@@ -95,8 +101,11 @@ void pd_execute_data_swap(int port, int data_role)
 	/* Do nothing */
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 }
 

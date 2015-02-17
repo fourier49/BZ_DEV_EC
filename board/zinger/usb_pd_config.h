@@ -107,8 +107,8 @@ static inline void pd_tx_init(void)
 
 static inline int pd_adc_read(int port, int cc)
 {
-	/* only one CC line */
-	return adc_read_channel(ADC_CH_CC1_PD);
+	/* only one CC line, assume other one is always high */
+	return (cc == 0) ? adc_read_channel(ADC_CH_CC1_PD) : 4096;
 }
 
 /* 3.0A DFP : no-connect voltage is 2.45V */
@@ -118,6 +118,7 @@ static inline int pd_adc_read(int port, int cc)
 #define PD_DEFAULT_STATE PD_STATE_SRC_DISCONNECTED
 
 /* delay necessary for the voltage transition on the power supply */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 50000 /* us */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  50000 /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 50000 /* us */
 
 #endif /* __USB_PD_CONFIG_H */

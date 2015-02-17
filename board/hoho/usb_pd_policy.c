@@ -7,6 +7,7 @@
 #include "board.h"
 #include "common.h"
 #include "console.h"
+#include "ec_commands.h"
 #include "gpio.h"
 #include "hooks.h"
 #include "registers.h"
@@ -33,16 +34,20 @@ const uint32_t pd_snk_pdo[] = {
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
-/* Whether alternate mode has been entered or not */
-static int alt_mode;
-/* When set true, we are in GFU mode */
-static int gfu_mode;
+/* Holds valid object position (opos) for entered mode */
+static int alt_mode[PD_AMODE_COUNT];
 
 void pd_set_input_current_limit(int port, uint32_t max_ma,
 				uint32_t supply_voltage)
 {
 	/* No battery, nothing to do */
 	return;
+}
+
+int pd_is_valid_input_voltage(int mv)
+{
+	/* Any voltage less than the max is allowed */
+	return 1;
 }
 
 int pd_check_requested_voltage(uint32_t rdo)
@@ -86,8 +91,11 @@ void pd_execute_data_swap(int port, int data_role)
 	/* Do nothing */
 }
 
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap)
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
 {
 }
 /* ----------------- Vendor Defined Messages ------------------ */
@@ -185,32 +193,45 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 	/* SID & mode request is valid */
 	if ((PD_VDO_VID(payload[0]) == USB_SID_DISPLAYPORT) &&
 	    (PD_VDO_OPOS(payload[0]) == OPOS_DP)) {
-		alt_mode = OPOS_DP;
+		alt_mode[PD_AMODE_DISPLAYPORT] = OPOS_DP;
 		rv = 1;
+		pd_log_event(PD_EVENT_VIDEO_DP_MODE, 0, 1, NULL);
 	} else if ((PD_VDO_VID(payload[0]) == USB_VID_GOOGLE) &&
 		   (PD_VDO_OPOS(payload[0]) == OPOS_GFU)) {
-		alt_mode = OPOS_GFU;
-		gfu_mode = 1;
+		alt_mode[PD_AMODE_GOOGLE] = OPOS_GFU;
 		rv = 1;
 	}
-	/* TODO(p/33968): Enumerate USB BB here with updated mode choice */
+
+	if (rv)
+		/*
+		 * If we failed initial mode entry we'll have enumerated the USB
+		 * Billboard class.  If so we should disconnect.
+		 */
+		usb_disconnect();
+
 	return rv;
 }
 
-int pd_alt_mode(int port)
+int pd_alt_mode(int port, uint16_t svid)
 {
-	return alt_mode;
+	if (svid == USB_SID_DISPLAYPORT)
+		return alt_mode[PD_AMODE_DISPLAYPORT];
+	else if (svid == USB_VID_GOOGLE)
+		return alt_mode[PD_AMODE_GOOGLE];
+	return 0;
 }
 
 static int svdm_exit_mode(int port, uint32_t *payload)
 {
-	alt_mode = 0;
-	if (PD_VDO_VID(payload[0]) == USB_SID_DISPLAYPORT)
+	if (PD_VDO_VID(payload[0]) == USB_SID_DISPLAYPORT) {
 		gpio_set_level(GPIO_PD_SBU_ENABLE, 0);
-	else if (PD_VDO_VID(payload[0]) == USB_VID_GOOGLE)
-		gfu_mode = 0;
-	else
+		alt_mode[PD_AMODE_DISPLAYPORT] = 0;
+		pd_log_event(PD_EVENT_VIDEO_DP_MODE, 0, 0, NULL);
+	} else if (PD_VDO_VID(payload[0]) == USB_VID_GOOGLE) {
+		alt_mode[PD_AMODE_GOOGLE] = 0;
+	} else {
 		CPRINTF("Unknown exit mode req:0x%08x\n", payload[0]);
+	}
 
 	return 1; /* Must return ACK */
 }
@@ -229,34 +250,32 @@ const struct svdm_response svdm_rsp = {
 	.exit_mode = &svdm_exit_mode,
 };
 
-static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
-			 uint32_t **rpayload)
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
 {
-	int cmd = PD_VDO_CMD(payload[0]);
 	int rsize;
 
-	if (PD_VDO_VID(payload[0]) != USB_VID_GOOGLE || !gfu_mode)
+	if (PD_VDO_VID(payload[0]) != USB_VID_GOOGLE ||
+	    !alt_mode[PD_AMODE_GOOGLE])
 		return 0;
-
-	CPRINTF("VDM/%d [%d] %08x\n", cnt, cmd, payload[0]);
 
 	*rpayload = payload;
 
 	rsize = pd_custom_flash_vdm(port, cnt, payload);
-	if (!rsize)
-		return 0;
+	if (!rsize) {
+		int cmd = PD_VDO_CMD(payload[0]);
+		switch (cmd) {
+		case VDO_CMD_GET_LOG:
+			rsize = pd_vdm_get_log_entry(payload);
+			break;
+		default:
+			/* Unknown : do not answer */
+			return 0;
+		}
+	}
 
-	CPRINTS("DONE");
 	/* respond (positively) to the request */
 	payload[0] |= VDO_SRC_RESPONDER;
 
 	return rsize;
-}
-
-int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
-{
-	if (PD_VDO_SVDM(payload[0]))
-		return pd_svdm(port, cnt, payload, rpayload);
-	else
-		return pd_custom_vdm(port, cnt, payload, rpayload);
 }

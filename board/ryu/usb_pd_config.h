@@ -8,6 +8,10 @@
 #ifndef __USB_PD_CONFIG_H
 #define __USB_PD_CONFIG_H
 
+#include "charge_state.h"
+#include "clock.h"
+#include "registers.h"
+
 /* Port and task configuration */
 #define PD_PORT_COUNT 1
 #define PORT_TO_TASK_ID(port) TASK_ID_PD
@@ -43,6 +47,8 @@
 static inline void spi_enable_clock(int port)
 {
 	STM32_RCC_APB2ENR |= STM32_RCC_PB2_SPI1;
+	/* Delay 1 APB clock cycle after the clock is enabled */
+	clock_wait_bus_cycles(BUS_APB, 1);
 }
 
 #define DMAC_SPI_TX(p) STM32_DMAC_CH3
@@ -126,6 +132,7 @@ static inline void pd_set_host_mode(int port, int enable)
 	if (enable) {
 		/* We never charging in power source mode */
 		gpio_set_level(GPIO_USBC_CHARGE_EN_L, 1);
+		charge_set_input_current_limit(0);
 		/* High-Z is used for host mode. */
 		gpio_set_level(GPIO_USBC_CC1_DEVICE_ODL, 1);
 		gpio_set_level(GPIO_USBC_CC2_DEVICE_ODL, 1);
@@ -135,10 +142,23 @@ static inline void pd_set_host_mode(int port, int enable)
 		/* Pull low for device mode. */
 		gpio_set_level(GPIO_USBC_CC1_DEVICE_ODL, 0);
 		gpio_set_level(GPIO_USBC_CC2_DEVICE_ODL, 0);
-		/* Enable the charging path*/
 		gpio_set_level(GPIO_USBC_CHARGE_EN_L, 0);
 	}
 
+}
+
+/**
+ * Initialize various GPIOs and interfaces to safe state at start of pd_task.
+ *
+ * These include:
+ *   VCONNs disabled.
+ *
+ * @param port USB-C port number
+ */
+static inline void pd_config_init(int port)
+{
+	gpio_set_level(GPIO_USBC_VCONN1_EN_L, 1);
+	gpio_set_level(GPIO_USBC_VCONN2_EN_L, 1);
 }
 
 static inline int pd_adc_read(int port, int cc)
@@ -171,12 +191,16 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
 
 /* delay for the voltage transition on the power supply, chip max is 16us */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 20000 /* us */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  20000 /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 20000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 10000
-#define PD_MAX_POWER_MW       60000
+#define PD_MAX_POWER_MW       24000
 #define PD_MAX_CURRENT_MA     3000
 #define PD_MAX_VOLTAGE_MV     20000
+
+/* The lower the input voltage, the higher the power efficiency. */
+#define PD_PREFER_LOW_VOLTAGE
 
 #endif /* __USB_PD_CONFIG_H */

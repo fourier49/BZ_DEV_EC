@@ -289,8 +289,8 @@ void sniffer_task(void)
 			}
 			ep_buf[u][0] = sample_seq[d >> 3] | (d & 7);
 			ep_buf[u][1] = sample_tstamp[d >> 3];
-			memcpy_usbram(ep_buf[u] + 2,
-				      samples[d >> 4]+off, EP_PAYLOAD_SIZE);
+			memcpy_to_usbram(ep_buf[u] + 2,
+					 samples[d >> 4]+off, EP_PAYLOAD_SIZE);
 			atomic_clear((uint32_t *)&free_usb, 1 << u);
 			u = !u;
 			atomic_clear((uint32_t *)&filled_dma, 1 << d);
@@ -337,6 +337,13 @@ void recording_enable(uint8_t mask)
 {
 	/* TODO implement */
 }
+
+static void sniffer_sysjump(void)
+{
+	/* Stop DMA before jumping to avoid memory corruption */
+	recording_enable(0);
+}
+DECLARE_HOOK(HOOK_SYSJUMP, sniffer_sysjump, HOOK_PRIO_DEFAULT);
 
 static int command_sniffer(int argc, char **argv)
 {

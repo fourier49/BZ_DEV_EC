@@ -7,6 +7,7 @@
 #include "clock.h"
 #include "common.h"
 #include "console.h"
+#include "dma.h"
 #include "flash.h"
 #include "gpio.h"
 #include "hooks.h"
@@ -81,7 +82,6 @@ static const char * const reset_flag_descs[] = {
 	"hibernate", "rtc-alarm", "wake-pin", "low-battery", "sysjump",
 	"hard", "ap-off", "preserved"};
 
-static const char * const image_names[] = {"unknown", "RO", "RW"};
 static uint32_t reset_flags;
 static int jumped_to_image;
 static int disable_jump;  /* Disable ALL jumps if system is locked */
@@ -293,10 +293,11 @@ void system_disable_jump(void)
 		}
 		if (ret == EC_SUCCESS) {
 			enable_mpu = 1;
-			CPRINTS("%s image locked", image_names[copy]);
+			CPRINTS("%s image locked",
+				system_image_copy_t_to_string(copy));
 		} else {
 			CPRINTS("Failed to lock %s image (%d)",
-				image_names[copy], ret);
+				system_image_copy_t_to_string(copy), ret);
 		}
 
 		if (enable_mpu)
@@ -309,6 +310,10 @@ void system_disable_jump(void)
 
 test_mockable enum system_image_copy_t system_get_image_copy(void)
 {
+	/* TODO: (ML) return which region is used in Code RAM */
+#ifdef CONFIG_CODERAM_ARCH
+	return system_get_shrspi_image_copy();
+#else
 	uintptr_t my_addr = (uintptr_t)system_get_image_copy -
 			    CONFIG_FLASH_BASE;
 
@@ -321,6 +326,7 @@ test_mockable enum system_image_copy_t system_get_image_copy(void)
 		return SYSTEM_IMAGE_RW;
 
 	return SYSTEM_IMAGE_UNKNOWN;
+#endif
 }
 
 int system_get_image_used(enum system_image_copy_t copy)
@@ -328,7 +334,7 @@ int system_get_image_used(enum system_image_copy_t copy)
 	const uint8_t *image;
 	int size = 0;
 
-	image = (const uint8_t *)(get_base(copy));
+	image = (const uint8_t *)get_base(copy);
 	size = get_size(copy);
 
 	if (size <= 0)
@@ -341,7 +347,6 @@ int system_get_image_used(enum system_image_copy_t copy)
 	 */
 	for (size--; size > 0 && image[size] != 0xea; size--)
 		;
-
 	return size ? size + 1 : 0;  /* 0xea byte IS part of the image */
 }
 
@@ -372,8 +377,13 @@ test_mockable int system_unsafe_to_overwrite(uint32_t offset, uint32_t size)
 
 const char *system_get_image_copy_string(void)
 {
-	int copy = system_get_image_copy();
-	return copy < ARRAY_SIZE(image_names) ? image_names[copy] : "?";
+	return system_image_copy_t_to_string(system_get_image_copy());
+}
+
+const char *system_image_copy_t_to_string(enum system_image_copy_t copy)
+{
+	static const char * const image_names[] = {"unknown", "RO", "RW"};
+	return image_names[copy < ARRAY_SIZE(image_names) ? copy : 0];
 }
 
 /**
@@ -415,6 +425,11 @@ static void jump_to_image(uintptr_t init_addr)
 
 	/* Disable interrupts before jump */
 	interrupt_disable();
+
+#ifdef CONFIG_DMA
+	/* Disable all DMA channels to avoid memory corruption */
+	dma_disable_all();
+#endif /* CONFIG_DMA */
 
 	/* Fill in preserved data between jumps */
 	jdata->reserved0 = 0;
@@ -462,14 +477,19 @@ int system_run_image_copy(enum system_image_copy_t copy)
 	if (base == 0xffffffff)
 		return EC_ERROR_INVAL;
 
+	/* TODO: (ML) jump to little FW for code ram architecture */
+#ifdef CONFIG_CODERAM_ARCH
+	init_addr = system_get_lfw_address(base);
+#else
 	/* Make sure the reset vector is inside the destination image */
 	init_addr = *(uintptr_t *)(base + 4);
 #ifndef EMU_BUILD
 	if (init_addr < base || init_addr >= base + get_size(copy))
 		return EC_ERROR_UNKNOWN;
 #endif
+#endif
 
-	CPRINTS("Jumping to image %s", image_names[copy]);
+	CPRINTS("Jumping to image %s", system_image_copy_t_to_string(copy));
 
 	jump_to_image(init_addr);
 
@@ -479,6 +499,10 @@ int system_run_image_copy(enum system_image_copy_t copy)
 
 const char *system_get_version(enum system_image_copy_t copy)
 {
+#ifndef CONFIG_FLASH_MAPPED
+	static struct version_struct vdata;
+#endif
+
 	uintptr_t addr;
 	const struct version_struct *v;
 
@@ -490,13 +514,35 @@ const char *system_get_version(enum system_image_copy_t copy)
 	if (addr == 0xffffffff)
 		return "";
 
-	/* The version string is always located after the reset vectors, so
-	 * it's the same as in the current image. */
+	/*
+	 * The version string is always located after the reset vectors, so
+	 * it's the same offset as in the current image.  Find that offset.
+	 */
+#ifdef CONFIG_CODERAM_ARCH
+	/*
+	 * Code has been copied from flash to code RAM, so offset of the
+	 * current image's version struct is from the start of code RAM, not
+	 * the start of the flash image.
+	 */
+	addr += ((uintptr_t)&version_data - CONFIG_CDRAM_BASE);
+#else
+	/* Offset is from the start of the flash image */
 	addr += ((uintptr_t)&version_data - get_base(system_get_image_copy()));
+#endif
+
+#ifdef CONFIG_FLASH_MAPPED
+	/* Directly access the version data */
+	v = (const struct version_struct *)addr;
+#else
+	/* Read the version struct into a buffer */
+	if (flash_read(addr - CONFIG_FLASH_BASE, sizeof(vdata), (char *)&vdata))
+		return "";
+
+	v = &vdata;
+#endif
 
 	/* Make sure the version struct cookies match before returning the
 	 * version string. */
-	v = (const struct version_struct *)addr;
 	if (v->cookie1 == RO(version_data).cookie1 &&
 	    v->cookie2 == RO(version_data).cookie2)
 		return v->version;

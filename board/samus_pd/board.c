@@ -29,15 +29,28 @@
 
 #define CPRINTS(format, args...) cprints(CC_USBCHARGE, format, ## args)
 
+/* Amount to offset the input current limit when sending to EC */
+#define INPUT_CURRENT_LIMIT_OFFSET_MA 192
+
 /* Chipset power state */
 static enum power_state ps;
 
 /* Battery state of charge */
 static int batt_soc;
 
+/* Default to 5V charging allowed for dead battery case */
+enum pd_charge_state charge_state = PD_CHARGE_5V;
+
 /* PD MCU status and host event status for host command */
 static struct ec_response_pd_status pd_status;
 static struct ec_response_host_event_status host_event_status;
+
+/*
+ * Store the state of our USB data switches so that they can be restored
+ * after pericom reset.
+ */
+static int usb_switch_state[PD_PORT_COUNT];
+static struct mutex usb_switch_lock[PD_PORT_COUNT];
 
 /* PWM channels. Must be in the exact same order as in enum pwm_channel. */
 const struct pwm_t pwm_channels[] = {
@@ -59,19 +72,20 @@ BUILD_ASSERT(ARRAY_SIZE(supplier_priority) == CHARGE_SUPPLIER_COUNT);
 
 static void pericom_port0_reenable_interrupts(void)
 {
+	CPRINTS("VBUS p0 %d", gpio_get_level(GPIO_USB_C0_VBUS_WAKE));
 	pi3usb9281_enable_interrupts(0);
 }
 DECLARE_DEFERRED(pericom_port0_reenable_interrupts);
 
 static void pericom_port1_reenable_interrupts(void)
 {
+	CPRINTS("VBUS p1 %d", gpio_get_level(GPIO_USB_C1_VBUS_WAKE));
 	pi3usb9281_enable_interrupts(1);
 }
 DECLARE_DEFERRED(pericom_port1_reenable_interrupts);
 
 void vbus0_evt(enum gpio_signal signal)
 {
-	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
 	/*
 	 * Re-enable interrupts on pericom charger detector since the
 	 * chip may periodically reset itself, and come back up with
@@ -79,12 +93,12 @@ void vbus0_evt(enum gpio_signal signal)
 	 * these unwanted resets.
 	 */
 	hook_call_deferred(pericom_port0_reenable_interrupts, 0);
-	task_wake(TASK_ID_PD_C0);
+	if (task_start_called())
+		task_wake(TASK_ID_PD_C0);
 }
 
 void vbus1_evt(enum gpio_signal signal)
 {
-	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
 	/*
 	 * Re-enable interrupts on pericom charger detector since the
 	 * chip may periodically reset itself, and come back up with
@@ -92,54 +106,145 @@ void vbus1_evt(enum gpio_signal signal)
 	 * these unwanted resets.
 	 */
 	hook_call_deferred(pericom_port1_reenable_interrupts, 0);
-	task_wake(TASK_ID_PD_C1);
+	if (task_start_called())
+		task_wake(TASK_ID_PD_C1);
 }
 
-/*
- * Update available charge. Called from deferred task, queued on Pericom
- * interrupt.
- */
-static void board_usb_charger_update(int port)
+void set_usb_switches(int port, int open)
 {
+	mutex_lock(&usb_switch_lock[port]);
+	usb_switch_state[port] = open;
+	pi3usb9281_set_switches(port, open);
+	mutex_unlock(&usb_switch_lock[port]);
+}
+
+/* Wait after a charger is detected to debounce pin contact order */
+#define USB_CHG_DEBOUNCE_DELAY_MS 1000
+/*
+ * Wait after reset, before re-enabling attach interrupt, so that the
+ * spurious attach interrupt from certain ports is ignored.
+ */
+#define USB_CHG_RESET_DELAY_MS 100
+
+/* Automatically do one redetection after a timeout period, for SDP ports. */
+#define USB_CHG_AUTO_REDETECT_TIMEOUT (30 * SECOND)
+
+void usb_charger_task(void)
+{
+	int port = (task_get_current() == TASK_ID_USB_CHG_P0 ? 0 : 1);
 	int device_type, charger_status;
 	struct charge_port_info charge;
-	int type;
+	int type, redetect_timeout;
+	uint32_t wake_event = 0;
 	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
 
-	/* Read interrupt register to clear*/
-	pi3usb9281_get_interrupts(port);
+	while (1) {
+		/* By default, don't do automatic redetection */
+		redetect_timeout = -1;
 
-	/* Set device type */
-	device_type = pi3usb9281_get_device_type(port);
-	charger_status = pi3usb9281_get_charger_status(port);
-	if (PI3USB9281_CHG_STATUS_ANY(charger_status))
-		type = CHARGE_SUPPLIER_PROPRIETARY;
-	else if (device_type & PI3USB9281_TYPE_CDP)
-		type = CHARGE_SUPPLIER_BC12_CDP;
-	else if (device_type & PI3USB9281_TYPE_DCP)
-		type = CHARGE_SUPPLIER_BC12_DCP;
-	else if (device_type & PI3USB9281_TYPE_SDP)
-		type = CHARGE_SUPPLIER_BC12_SDP;
-	else
-		type = CHARGE_SUPPLIER_OTHER;
+		/* Read interrupt register to clear on chip */
+		pi3usb9281_get_interrupts(port);
 
-	/* Attachment: decode + update available charge */
-	if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
-		charge.current = pi3usb9281_get_ilim(device_type,
-						     charger_status);
-		charge_manager_update(type, port, &charge);
-	} else { /* Detachment: update available charge to 0 */
-		charge.current = 0;
-		charge_manager_update(CHARGE_SUPPLIER_PROPRIETARY, port,
-				      &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_CDP, port, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_DCP, port, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_SDP, port, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_OTHER, port, &charge);
+		/* Set device type */
+		device_type = pi3usb9281_get_device_type(port);
+		charger_status = pi3usb9281_get_charger_status(port);
+
+		/* Debounce pin plug order if we detect a charger */
+		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
+			msleep(USB_CHG_DEBOUNCE_DELAY_MS);
+
+			/*
+			 * Trigger chip reset to refresh detection registers.
+			 * WARNING: This reset is acceptable for samus_pd,
+			 * but may not be acceptable for devices that have
+			 * an OTG / device mode, as we may be interrupting
+			 * the connection.
+			 */
+			pi3usb9281_reset(port);
+			/*
+			 * Restore data switch settings - switches return to
+			 * closed on reset until restored.
+			 */
+			mutex_lock(&usb_switch_lock[port]);
+			if (usb_switch_state[port])
+				pi3usb9281_set_switches(port, 1);
+			mutex_unlock(&usb_switch_lock[port]);
+			/* Clear possible disconnect interrupt */
+			pi3usb9281_get_interrupts(port);
+			/* Mask attach interrupt */
+			pi3usb9281_set_interrupt_mask(port,
+						      0xff &
+						      ~PI3USB9281_INT_ATTACH);
+			/* Re-enable interrupts */
+			pi3usb9281_enable_interrupts(port);
+			msleep(USB_CHG_RESET_DELAY_MS);
+
+			/* Clear possible attach interrupt */
+			pi3usb9281_get_interrupts(port);
+			/* Re-enable attach interrupt */
+			pi3usb9281_set_interrupt_mask(port, 0xff);
+
+			/* Re-read ID registers */
+			device_type = pi3usb9281_get_device_type(port);
+			charger_status = pi3usb9281_get_charger_status(port);
+		}
+
+		if (PI3USB9281_CHG_STATUS_ANY(charger_status))
+			type = CHARGE_SUPPLIER_PROPRIETARY;
+		else if (device_type & PI3USB9281_TYPE_CDP)
+			type = CHARGE_SUPPLIER_BC12_CDP;
+		else if (device_type & PI3USB9281_TYPE_DCP)
+			type = CHARGE_SUPPLIER_BC12_DCP;
+		else if (device_type & PI3USB9281_TYPE_SDP) {
+			/*
+			 * Automatically do one redetection after a timeout
+			 * period when an SDP port is identified, since
+			 * pin contact order may have caused
+			 * misidentification.
+			 */
+			if (wake_event != TASK_EVENT_TIMER)
+				redetect_timeout =
+					USB_CHG_AUTO_REDETECT_TIMEOUT;
+			type = CHARGE_SUPPLIER_BC12_SDP;
+		}
+		else
+			type = CHARGE_SUPPLIER_OTHER;
+
+		/* Attachment: decode + update available charge */
+		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
+			charge.current = pi3usb9281_get_ilim(device_type,
+							     charger_status);
+			charge_manager_update_charge(type, port, &charge);
+		} else { /* Detachment: update available charge to 0 */
+			charge.current = 0;
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_PROPRIETARY,
+						port,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_CDP,
+						port,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_DCP,
+						port,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_BC12_SDP,
+						port,
+						&charge);
+			charge_manager_update_charge(
+						CHARGE_SUPPLIER_OTHER,
+						port,
+						&charge);
+		}
+
+		/* notify host of power info change */
+		pd_send_host_event(PD_EVENT_POWER_CHANGE);
+
+		/* Wait for interrupt */
+		wake_event = task_wait_event(redetect_timeout);
 	}
-
-	/* notify host of power info change */
-	pd_send_host_event(PD_EVENT_POWER_CHANGE);
 }
 
 /* Charge manager callback function, called on delayed override timeout */
@@ -149,63 +254,80 @@ void board_charge_manager_override_timeout(void)
 }
 DECLARE_DEFERRED(board_charge_manager_override_timeout);
 
-/* Pericom USB deferred tasks -- called after USB device insert / removal */
-static void usb_port0_charger_update(void)
+static void wake_usb_charger_task(int port)
 {
-	board_usb_charger_update(0);
+	task_wake(port ? TASK_ID_USB_CHG_P1 : TASK_ID_USB_CHG_P0);
 }
-DECLARE_DEFERRED(usb_port0_charger_update);
-
-static void usb_port1_charger_update(void)
-{
-	board_usb_charger_update(1);
-}
-DECLARE_DEFERRED(usb_port1_charger_update);
 
 void usb0_evt(enum gpio_signal signal)
 {
-	hook_call_deferred(usb_port0_charger_update, 0);
+	wake_usb_charger_task(0);
 }
 
 void usb1_evt(enum gpio_signal signal)
 {
-	hook_call_deferred(usb_port1_charger_update, 0);
+	wake_usb_charger_task(1);
 }
 
-void pch_evt(enum gpio_signal signal)
+static void chipset_s5_to_s3(void)
 {
-	/* Determine new chipset state, trigger corresponding hook */
+	ps = POWER_S3;
+	hook_notify(HOOK_CHIPSET_STARTUP);
+}
+
+static void chipset_s3_to_s0(void)
+{
+	/* Disable deep sleep and restore charge override port */
+	disable_sleep(SLEEP_MASK_AP_RUN);
+	ps = POWER_S0;
+	hook_notify(HOOK_CHIPSET_RESUME);
+}
+
+static void chipset_s3_to_s5(void)
+{
+	ps = POWER_S5;
+	hook_notify(HOOK_CHIPSET_SHUTDOWN);
+}
+
+static void chipset_s0_to_s3(void)
+{
+	/* Enable deep sleep and store charge override port */
+	enable_sleep(SLEEP_MASK_AP_RUN);
+	ps = POWER_S3;
+	hook_notify(HOOK_CHIPSET_SUSPEND);
+}
+
+static void pch_evt_deferred(void)
+{
+	/* Determine new chipset state, trigger corresponding transition */
 	switch (ps) {
 	case POWER_S5:
-		if (gpio_get_level(GPIO_PCH_SLP_S5_L)) {
-			/* S5 -> S3 */
-			hook_notify(HOOK_CHIPSET_STARTUP);
-			ps = POWER_S3;
-		}
+		if (gpio_get_level(GPIO_PCH_SLP_S5_L))
+			chipset_s5_to_s3();
+		if (gpio_get_level(GPIO_PCH_SLP_S3_L))
+			chipset_s3_to_s0();
 		break;
 	case POWER_S3:
-		if (gpio_get_level(GPIO_PCH_SLP_S3_L)) {
-			/* S3 -> S0: disable deep sleep */
-			disable_sleep(SLEEP_MASK_AP_RUN);
-			hook_notify(HOOK_CHIPSET_RESUME);
-			ps = POWER_S0;
-		} else if (!gpio_get_level(GPIO_PCH_SLP_S5_L)) {
-			/* S3 -> S5 */
-			hook_notify(HOOK_CHIPSET_SHUTDOWN);
-			ps = POWER_S5;
-		}
+		if (gpio_get_level(GPIO_PCH_SLP_S3_L))
+			chipset_s3_to_s0();
+		else if (!gpio_get_level(GPIO_PCH_SLP_S5_L))
+			chipset_s3_to_s5();
 		break;
 	case POWER_S0:
-		if (!gpio_get_level(GPIO_PCH_SLP_S3_L)) {
-			/* S0 -> S3: enable deep sleep */
-			enable_sleep(SLEEP_MASK_AP_RUN);
-			hook_notify(HOOK_CHIPSET_SUSPEND);
-			ps = POWER_S3;
-		}
+		if (!gpio_get_level(GPIO_PCH_SLP_S3_L))
+			chipset_s0_to_s3();
+		if (!gpio_get_level(GPIO_PCH_SLP_S5_L))
+			chipset_s3_to_s5();
 		break;
 	default:
 		break;
 	}
+}
+DECLARE_DEFERRED(pch_evt_deferred);
+
+void pch_evt(enum gpio_signal signal)
+{
+	hook_call_deferred(pch_evt_deferred, 0);
 }
 
 void board_config_pre_init(void)
@@ -254,12 +376,21 @@ static void board_init(void)
 	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
 	charge.current = 0;
 	for (i = 0; i < PD_PORT_COUNT; i++) {
-		charge_manager_update(CHARGE_SUPPLIER_PROPRIETARY, i,
-				      &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_CDP, i, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_DCP, i, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_BC12_SDP, i, &charge);
-		charge_manager_update(CHARGE_SUPPLIER_OTHER, i, &charge);
+		charge_manager_update_charge(CHARGE_SUPPLIER_PROPRIETARY,
+					     i,
+					     &charge);
+		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_CDP,
+					     i,
+					     &charge);
+		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_DCP,
+					     i,
+					     &charge);
+		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_SDP,
+					     i,
+					     &charge);
+		charge_manager_update_charge(CHARGE_SUPPLIER_OTHER,
+					     i,
+					     &charge);
 	}
 
 	/* Enable pericom BC1.2 interrupts. */
@@ -289,6 +420,9 @@ static void board_init(void)
 	gpio_enable_interrupt(GPIO_PCH_SLP_S3_L);
 	gpio_enable_interrupt(GPIO_PCH_SLP_S5_L);
 
+	/* Initialize active charge port to none */
+	pd_status.active_charge_port = CHARGE_PORT_NONE;
+
 	/*
 	 * Do not enable PD communication in RO as a security measure.
 	 * We don't want to allow communication to outside world until
@@ -305,17 +439,11 @@ static void board_init(void)
 	}
 	pd_comm_enable(pd_enable);
 
+#ifdef CONFIG_PWM
 	/* Enable ILIM PWM: initial duty cycle 0% = 500mA limit. */
 	pwm_enable(PWM_CH_ILIM, 1);
 	pwm_set_duty(PWM_CH_ILIM, 0);
-
-	/*
-	 * Initialize BC1.2 USB charging, so that charge manager will assign
-	 * charge port based upon charger actually present. Charger detection
-	 * can take up to 200ms after power-on, so delay the initialization.
-	 */
-	hook_call_deferred(usb_port0_charger_update, 200 * MSEC);
-	hook_call_deferred(usb_port1_charger_update, 200 * MSEC);
+#endif
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 
@@ -328,7 +456,7 @@ const struct adc_t adc_channels[] = {
 	[ADC_C1_CC2_PD] = {"C1_CC2_PD", 3300, 4096, 0, STM32_AIN(5)},
 
 	/* Vbus sensing. Converted to mV, full ADC is equivalent to 25.774V. */
-	[ADC_BOOSTIN] = {"V_BOOSTIN",  25774, 4096, 0, STM32_AIN(11)},
+	[ADC_VBUS] = {"VBUS",  25774, 4096, 0, STM32_AIN(11)},
 };
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
@@ -491,18 +619,47 @@ static void pd_send_ec_int(void)
  */
 int board_set_active_charge_port(int charge_port)
 {
-	if (charge_port >= 0 && charge_port < PD_PORT_COUNT &&
-	    pd_get_role(charge_port) != PD_ROLE_SINK) {
+	/* charge port is a realy physical port */
+	int is_real_port = (charge_port >= 0 && charge_port < PD_PORT_COUNT);
+
+	if (is_real_port && pd_get_role(charge_port) != PD_ROLE_SINK) {
 		CPRINTS("Skip enable p%d", charge_port);
 		return EC_ERROR_INVAL;
 	}
 
-	pd_status.active_charge_port = charge_port;
-	gpio_set_level(GPIO_USB_C0_CHARGE_EN_L, !(charge_port == 0));
-	gpio_set_level(GPIO_USB_C1_CHARGE_EN_L, !(charge_port == 1));
-
 	CPRINTS("New chg p%d", charge_port);
+
+	/*
+	 * If charging and the active charge port is changed, then disable
+	 * charging to guarantee charge circuit starts up cleanly.
+	 */
+	if (pd_status.active_charge_port != CHARGE_PORT_NONE &&
+	    (charge_port == CHARGE_PORT_NONE ||
+	     charge_port != pd_status.active_charge_port)) {
+		gpio_set_level(GPIO_USB_C0_CHARGE_EN_L, 1);
+		gpio_set_level(GPIO_USB_C1_CHARGE_EN_L, 1);
+		charge_state = PD_CHARGE_NONE;
+		pd_status.active_charge_port = charge_port;
+		CPRINTS("Chg: None\n");
+		return EC_SUCCESS;
+	}
+
+	/* Save active charge port and enable charging if allowed */
+	pd_status.active_charge_port = charge_port;
+	if (charge_state != PD_CHARGE_NONE) {
+		gpio_set_level(GPIO_USB_C0_CHARGE_EN_L, !(charge_port == 0));
+		gpio_set_level(GPIO_USB_C1_CHARGE_EN_L, !(charge_port == 1));
+	}
+
 	return EC_SUCCESS;
+}
+
+/**
+ * Return if max voltage charging is allowed.
+ */
+int pd_is_max_request_allowed(void)
+{
+	return charge_state == PD_CHARGE_MAX;
 }
 
 /**
@@ -512,6 +669,7 @@ int board_set_active_charge_port(int charge_port)
  */
 void board_set_charge_limit(int charge_ma)
 {
+#ifdef CONFIG_PWM
 	int pwm_duty = MA_TO_PWM(charge_ma);
 	if (pwm_duty < 0)
 		pwm_duty = 0;
@@ -519,8 +677,10 @@ void board_set_charge_limit(int charge_ma)
 		pwm_duty = 100;
 
 	pwm_set_duty(PWM_CH_ILIM, pwm_duty);
+#endif
 
-	pd_status.curr_lim_ma = charge_ma;
+	pd_status.curr_lim_ma = MAX(0, charge_ma -
+					INPUT_CURRENT_LIMIT_OFFSET_MA);
 	pd_send_ec_int();
 
 	CPRINTS("New ilim %d", charge_ma);
@@ -579,7 +739,60 @@ static int ec_status_host_cmd(struct host_cmd_handler_args *args)
 	const struct ec_params_pd_status *p = args->params;
 	struct ec_response_pd_status *r = args->response;
 
+	/* update battery soc */
 	board_update_battery_soc(p->batt_soc);
+
+	if (args->version == 1) {
+		if (p->charge_state != charge_state) {
+			switch (p->charge_state) {
+			case PD_CHARGE_NONE:
+				/*
+				 * No current allowed in, set new power request
+				 * so that PD negotiates down to vSafe5V.
+				 */
+				charge_state = p->charge_state;
+				gpio_set_level(GPIO_USB_C0_CHARGE_EN_L, 1);
+				gpio_set_level(GPIO_USB_C1_CHARGE_EN_L, 1);
+				pd_set_new_power_request(
+					pd_status.active_charge_port);
+				CPRINTS("Chg: None");
+				break;
+			case PD_CHARGE_5V:
+				/* Allow current on the active charge port */
+				charge_state = p->charge_state;
+				gpio_set_level(GPIO_USB_C0_CHARGE_EN_L,
+					!(pd_status.active_charge_port == 0));
+				gpio_set_level(GPIO_USB_C1_CHARGE_EN_L,
+					!(pd_status.active_charge_port == 1));
+				CPRINTS("Chg: 5V");
+				break;
+			case PD_CHARGE_MAX:
+				/*
+				 * Allow negotiation above vSafe5V. Should only
+				 * ever get this command when 5V charging is
+				 * already allowed.
+				 */
+				if (charge_state == PD_CHARGE_5V) {
+					charge_state = p->charge_state;
+					pd_set_new_power_request(
+						pd_status.active_charge_port);
+					CPRINTS("Chg: Max");
+				}
+				break;
+			default:
+				break;
+			}
+		}
+	} else {
+		/*
+		 * If the EC is using this command version, then it won't ever
+		 * set charging allowed, so we should just assume charging at
+		 * the max is allowed.
+		 */
+		charge_state = PD_CHARGE_MAX;
+		pd_set_new_power_request(pd_status.active_charge_port);
+		CPRINTS("Chg: Max");
+	}
 
 	*r = pd_status;
 
@@ -591,11 +804,11 @@ static int ec_status_host_cmd(struct host_cmd_handler_args *args)
 	return EC_RES_SUCCESS;
 }
 DECLARE_HOST_COMMAND(EC_CMD_PD_EXCHANGE_STATUS, ec_status_host_cmd,
-			EC_VER_MASK(0));
+			EC_VER_MASK(0) | EC_VER_MASK(1));
 
 static int host_event_status_host_cmd(struct host_cmd_handler_args *args)
 {
-	struct ec_response_pd_status *r = args->response;
+	struct ec_response_host_event_status *r = args->response;
 
 	/* Clear host event bit to avoid sending more unnecessary events */
 	atomic_clear(&(pd_status.status), PD_STATUS_HOST_EVENT);

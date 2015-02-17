@@ -64,8 +64,9 @@ BOARDS_STM32=(
 	discovery
 	firefly
 	fruitpie
-	jerry	
+	jerry
 	kitty
+	llama
 	mighty
 	minimuffin
 	nyan
@@ -82,6 +83,10 @@ BOARDS_STM32=(
 	zinger
 )
 
+BOARDS_PRIVATE_SPI_PP3300=(
+	glower
+)
+
 BOARDS_STM32_PROG_EN=(
 	plankton
 )
@@ -90,6 +95,10 @@ BOARDS_STM32_DFU=(
 	dingdong
 	hoho
 	twinkie
+)
+
+BOARDS_NPCX=(
+	npcx_evb
 )
 
 # Flags
@@ -130,6 +139,10 @@ in_array() {
 		fi
 	done
 	return 1
+}
+
+servo_has_warm_reset() {
+	dut_control warm_reset >/dev/null 2>&1
 }
 
 # reset the EC
@@ -200,7 +213,9 @@ BOARD=${FLAGS_board}
 BOARD_ROOT=/build/${BOARD}
 
 # Possible default EC images
-if [ "${FLAGS_ro}" = ${FLAGS_TRUE} ] ; then
+if $(in_array "${BOARDS_PRIVATE_SPI_PP3300[@]}" "${BOARD}"); then
+	EC_FILE=ec.spi.bin
+elif [ "${FLAGS_ro}" = ${FLAGS_TRUE} ] ; then
 	EC_FILE=ec.RO.flat
 else
 	EC_FILE=ec.bin
@@ -238,6 +253,10 @@ function ec_image() {
 
 DUT_CONTROL_CMD="dut-control --port=${FLAGS_port}"
 
+function dut_control() {
+	$DUT_CONTROL_CMD "$@" >/dev/null
+}
+
 # Find the EC UART on the servo v2
 function ec_uart() {
 	SERVOD_FAIL="Cannot communicate with servo. is servod running ?"
@@ -261,12 +280,14 @@ if [[ "${MCU}" == "usbpd" ]] ; then
 		servo_VARS+=" prog_en"
 	fi
 fi
+if $(in_array "${BOARDS_PRIVATE_SPI_PP3300[@]}" "${BOARD}"); then
+	servo_VARS+=" spi1_buf_en spi1_buf_on_flex_en spi_hold"
+fi
+if $(servo_has_warm_reset); then
+	servo_VARS+=" warm_reset"
+fi
 toad_VARS="${MCU}_uart_parity \
 ${MCU}_uart_baudrate boot_mode"
-
-function dut_control() {
-	$DUT_CONTROL_CMD "$@" >/dev/null
-}
 
 function servo_save() {
 	SERVO_VARS_NAME=${SERVO_TYPE}_VARS
@@ -307,6 +328,25 @@ function free_pty() {
 
 # Board specific flashing scripts
 
+# helper function for setting up servo v2/3 with openocd paths
+function setup_openocd() {
+	if [[ -z "${EC_DIR}" ]]; then
+	    # check if we're on beaglebone
+	    if [[ -e "/usr/bin/lib" ]]; then
+		OCD_CFG="servo_v3.cfg"
+		OCD_PATH="/usr/bin/lib"
+	    else
+		die "Cannot locate openocd configs"
+	    fi
+	else
+	    if [ "${FLAGS_usb}" = ${FLAGS_TRUE} ] ; then
+		OCD_CFG="${BOARD}.cfg"
+	    else
+		OCD_CFG="servo_v2.cfg"
+	    fi
+	fi
+}
+
 function flash_stm32() {
 	TOOL_PATH="${EC_DIR}/build/${BOARD}/util:$PATH"
 	STM32MON=$(PATH="${TOOL_PATH}" which stm32mon)
@@ -328,12 +368,15 @@ function flash_stm32() {
 	fi
 	dut_control ${MCU}_uart_parity:even
 	dut_control ${MCU}_uart_baudrate:115200
+	if $(servo_has_warm_reset); then
+		dut_control warm_reset:on
+	fi
 	# Force the EC to boot in serial monitor mode
 	ec_enable_boot0
 	# Reset the EC
 	ec_reset
 	# Unprotect flash, erase, and write
-	${STM32MON} -d ${EC_UART} -u -e -w "${IMG}"
+	${STM32MON} -d ${EC_UART} -U -u -e -w "${IMG}"
 }
 
 function flash_stm32_dfu() {
@@ -353,14 +396,18 @@ function flash_stm32_dfu() {
 	fi
 
 	SIZE=$(wc -c ${IMG} | cut -d' ' -f1)
+	# Remove read protection
+	sudo $DFU_UTIL -a 0 -s ${ADDR}:${SIZE}:force:unprotect -D "${IMG}"
+	# Wait for mass-erase and reboot after unprotection
+	sleep 1
+	# Actual image flashing
 	sudo $DFU_UTIL -a 0 -s ${ADDR}:${SIZE} -D "${IMG}"
 }
 
 function flash_link() {
-	[[ -n "${EC_DIR}" ]] || die "Cannot locate openocd script"
-
-	OCD_CFG="servo_v2.cfg"
 	OCD_PATH="${EC_DIR}/chip/lm4/openocd"
+	setup_openocd
+
 	OCD_CMDS="init; flash_lm4 ${IMG} ${FLAGS_offset};"
 	if [ "${FLAGS_unprotect}" = ${FLAGS_TRUE} ] ; then
 		info "Clearing write protect flag."
@@ -376,15 +423,9 @@ function flash_link() {
 }
 
 function flash_lm4() {
-	[[ -n "${EC_DIR}" ]] || die "Cannot locate openocd script"
-
-	if [ "${FLAGS_usb}" = ${FLAGS_TRUE} ] ; then
-		OCD_CFG="${BOARD}.cfg"
-	else
-		OCD_CFG="servo_v2.cfg"
-	fi
-
 	OCD_PATH="${EC_DIR}/chip/lm4/openocd"
+	setup_openocd
+
 	OCD_CMDS="init; flash_lm4 ${IMG} ${FLAGS_offset};"
 	if [ "${FLAGS_unprotect}" = ${FLAGS_TRUE} ] ; then
 		# Unprotect exists, but isn't needed because erasing pstate is
@@ -398,6 +439,38 @@ function flash_lm4() {
 
 	sudo openocd -s "${OCD_PATH}" -f "${OCD_CFG}" -c "${OCD_CMDS}" || \
 	die "Failed to program ${IMG}"
+}
+
+function flash_npcx() {
+	OCD_PATH="${EC_DIR}/chip/npcx/openocd"
+	setup_openocd
+
+	if [ "${FLAGS_unprotect}" = ${FLAGS_TRUE} ] ; then
+		# Unprotect exists, but isn't needed because erasing pstate is
+		# implicit in writing the entire image
+		die "--unprotect not supported for this board."
+	fi
+
+	dut_control jtag_buf_on_flex_en:on
+	dut_control jtag_buf_en:on
+
+	if [ "${FLAGS_ro}" = ${FLAGS_TRUE} ] ; then
+		# Program RO region only
+		OCD_CMDS="init; flash_npcx_ro ${FLAGS_offset}; shutdown;"
+		sudo openocd -s "${OCD_PATH}" -f "${OCD_CFG}" -c "${OCD_CMDS}" || \
+		die "Failed to program ${IMG}"
+	else
+		# Program all EC regions
+		OCD_CMDS="init; flash_npcx_evb ${FLAGS_offset}; shutdown;"
+		sudo openocd -s "${OCD_PATH}" -f "${OCD_CFG}" -c "${OCD_CMDS}" || \
+		die "Failed to program ${IMG}"
+	fi
+}
+
+function flash_private_spi_pp3300() {
+	dut_control cold_reset:on spi1_vref:pp3300
+	dut_control spi1_buf_en:on spi1_buf_on_flex_en:on spi_hold:off
+	sudo flashrom -p ft2232_spi:type=servo-v2,port=B -w "${IMG}"
 }
 
 if dut_control boot_mode 2>/dev/null ; then
@@ -429,6 +502,10 @@ elif $(in_array "${BOARDS_STM32_DFU[@]}" "${BOARD}"); then
 	flash_stm32_dfu
 elif [ "${BOARD}" == "link" ]; then
 	flash_link
+elif $(in_array "${BOARDS_NPCX[@]}" "${BOARD}"); then
+	flash_npcx
+elif $(in_array "${BOARDS_PRIVATE_SPI_PP3300[@]}" "${BOARD}"); then
+	flash_private_spi_pp3300
 else
 	die "board ${BOARD} not supported"
 fi

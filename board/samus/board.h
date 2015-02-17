@@ -22,6 +22,9 @@
 #define CONFIG_BOARD_VERSION
 #define CONFIG_CMD_ACCELS
 #define CONFIG_CMD_ACCEL_INFO
+#undef  CONFIG_BATTERY_CRITICAL_SHUTDOWN_TIMEOUT
+#define CONFIG_BATTERY_CRITICAL_SHUTDOWN_TIMEOUT 60
+#define CONFIG_BATTERY_CUT_OFF
 #define CONFIG_POWER_COMMON
 #define CONFIG_CHIPSET_CAN_THROTTLE
 #define CONFIG_KEYBOARD_BOARD_CONFIG
@@ -46,8 +49,9 @@
 #define CONFIG_CHARGER_ILIM_PIN_DISABLED
 #define CONFIG_CHARGER_SENSE_RESISTOR 5
 #define CONFIG_CHARGER_SENSE_RESISTOR_AC 10
-#define CONFIG_CHARGER_INPUT_CURRENT 448
+#define CONFIG_CHARGER_INPUT_CURRENT 320
 #define CONFIG_CHARGER_DISCHARGE_ON_AC
+#define CONFIG_CHARGER_MIN_BAT_PCT_FOR_POWER_ON 1
 #define CONFIG_FANS 2
 #define CONFIG_GESTURE_DETECTION
 #define CONFIG_GESTURE_SAMPLING_INTERVAL_MS 5
@@ -55,7 +59,7 @@
 #define CONFIG_HIBERNATE_DELAY_SEC (3600 * 24 * 7)
 #define CONFIG_HIBERNATE_BATT_PCT 10
 #define CONFIG_HIBERNATE_BATT_SEC (3600 * 24)
-#define CONFIG_PECI_TJMAX 100
+#define CONFIG_PECI_TJMAX 105
 #define CONFIG_PWM
 #define CONFIG_PWM_KBLIGHT
 #define CONFIG_TEMP_SENSOR
@@ -114,8 +118,6 @@ enum x86_signal {
 enum adc_channel {
 	/* EC internal die temperature in degrees K. */
 	ADC_CH_EC_TEMP = 0,
-	/* Charger current in mA. */
-	ADC_CH_CHARGER_CURRENT,
 	/* BAT_TEMP */
 	ADC_CH_BAT_TEMP,
 
@@ -172,6 +174,9 @@ enum als_id {
 
 /* Discharge battery when on AC power for factory test. */
 int board_discharge_on_ac(int enable);
+
+/* Backboost detected interrupt */
+void bkboost_det_interrupt(enum gpio_signal signal);
 
 /* Bit masks for turning on PP5000 rail in G3 */
 #define PP5000_IN_G3_AC       (1 << 0)

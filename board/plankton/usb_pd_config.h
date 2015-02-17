@@ -8,6 +8,8 @@
 #ifndef __USB_PD_CONFIG_H
 #define __USB_PD_CONFIG_H
 
+#include "board.h"
+
 /* USB-PD configuration */
 #define PD_PORT_COUNT 1
 #define PORT_TO_TASK_ID(port) TASK_ID_PD
@@ -124,38 +126,28 @@ static inline void pd_tx_init(void)
 
 static inline void pd_set_host_mode(int port, int enable)
 {
-	ccprintf("Host mode: %d\n", enable);
-	if (enable) {
-		/* Source mode, disable charging */
-		gpio_set_level(GPIO_USBC_CHARGE_EN, 0);
-		/* High Z for no pull-down resistor on CC1 */
-		gpio_set_flags_by_mask(GPIO_A, (1 << 9), GPIO_INPUT);
-		/* Set pull-up resistor on CC1 */
-		gpio_set_flags_by_mask(GPIO_A, (1 << 2), GPIO_OUT_HIGH);
-		/* High Z for no pull-down resistor on CC2 */
-		gpio_set_flags_by_mask(GPIO_B, (1 << 7), GPIO_INPUT);
-		/* Set pull-up resistor on CC2 */
-		gpio_set_flags_by_mask(GPIO_B, (1 << 6), GPIO_OUT_HIGH);
-	} else {
-		/* Device mode, disable VBUS */
-		gpio_set_level(GPIO_VBUS_CHARGER_EN, 0);
-		gpio_set_level(GPIO_USBC_VSEL_0, 0);
-		gpio_set_level(GPIO_USBC_VSEL_1, 0);
-		/* High Z for no pull-up resistor on CC1 */
-		gpio_set_flags_by_mask(GPIO_A, (1 << 2), GPIO_INPUT);
-		/* Set pull-down resistor on CC1 */
-		gpio_set_flags_by_mask(GPIO_A, (1 << 9), GPIO_OUT_LOW);
-		/* High Z for no pull-up resistor on CC2 */
-		gpio_set_flags_by_mask(GPIO_B, (1 << 6), GPIO_INPUT);
-		/* Set pull-down resistor on CC2 */
-		gpio_set_flags_by_mask(GPIO_B, (1 << 7), GPIO_OUT_LOW);
-		/* Set charge enable */
-		gpio_set_level(GPIO_USBC_CHARGE_EN, 1);
-	}
+	board_pd_set_host_mode(enable);
+}
+
+/**
+ * Initialize various GPIOs and interfaces to safe state at start of pd_task.
+ *
+ * These include:
+ *   VCONNs disabled.
+ *
+ * @param port USB-C port number
+ */
+static inline void pd_config_init(int port)
+{
+	gpio_set_level(GPIO_USB_CC1_VCONN_EN_L, 1);
+	gpio_set_level(GPIO_USB_CC2_VCONN_EN_L, 1);
 }
 
 static inline int pd_adc_read(int port, int cc)
 {
+	if (board_pd_fake_disconnected())
+		return board_fake_pd_adc_read();
+
 	if (cc == 0)
 		return adc_read_channel(ADC_CH_CC1_PD);
 	else
@@ -177,7 +169,8 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
 
 /* delay necessary for the voltage transition on the power supply */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 50000 /* us */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  50000 /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 50000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 5000

@@ -146,11 +146,12 @@ static void timers_init(void)
 	/* TIM2 is a 32-bit free running counter with 1Mhz frequency */
 	STM32_TIM_CR2(2) = 0x0000;
 	STM32_TIM32_ARR(2) = 0xFFFFFFFF;
-	STM32_TIM32_CNT(2) = 0;
 	STM32_TIM_PSC(2) = CPU_CLOCK / 1000000 - 1;
 	STM32_TIM_EGR(2) = 0x0001; /* Reload the pre-scaler */
 	STM32_TIM_CR1(2) = 1;
-	STM32_TIM_DIER(2) = 0;
+	STM32_TIM32_CNT(2) = 0x00000000;
+	STM32_TIM_SR(2) = 0; /* Clear pending interrupts */
+	STM32_TIM_DIER(2) = 1; /* Overflow interrupt */
 	task_enable_irq(STM32_IRQ_TIM2);
 }
 
@@ -295,8 +296,11 @@ int adc_disable_watchdog(void)
 /* Lock bits for FLASH_CR register */
 #define PG       (1<<0)
 #define PER      (1<<1)
+#define OPTPG    (1<<4)
+#define OPTER    (1<<5)
 #define STRT     (1<<6)
 #define CR_LOCK  (1<<7)
+#define OPTWRE   (1<<9)
 
 int flash_physical_write(int offset, int size, const char *data)
 {
@@ -397,4 +401,80 @@ exit_er:
 	STM32_FLASH_CR = CR_LOCK;
 
 	return res;
+}
+
+static void unlock_erase_optb(void)
+{
+	int i;
+
+	/* Clear previous error status */
+	STM32_FLASH_SR = 0x34;
+
+	/* wait to be ready  */
+	for (i = 0; (STM32_FLASH_SR & 1) && (i < FLASH_TIMEOUT_LOOP); i++)
+		;
+
+	/* Unlock the option bytes access */
+	if (STM32_FLASH_CR & CR_LOCK) {
+		STM32_FLASH_KEYR = KEY1;
+		STM32_FLASH_KEYR = KEY2;
+	}
+	if (!(STM32_FLASH_CR & OPTWRE)) {
+		STM32_FLASH_OPTKEYR = KEY1;
+		STM32_FLASH_OPTKEYR = KEY2;
+	}
+	/* Must be set in 2 separate lines. */
+	STM32_FLASH_CR |= OPTER;
+	STM32_FLASH_CR |= STRT;
+
+	/* wait to be ready  */
+	for (i = 0; (STM32_FLASH_SR & 1) && (i < FLASH_TIMEOUT_LOOP); i++)
+		;
+	/* reset erasing bits */
+	STM32_FLASH_CR = OPTWRE;
+}
+
+
+static void write_optb(int byte, uint8_t value)
+{
+	volatile int16_t *hword = (uint16_t *)(STM32_OPTB_BASE + byte);
+	int i;
+
+	/* Clear previous error status */
+	STM32_FLASH_SR = 0x34;
+
+	/* set OPTPG bit */
+	STM32_FLASH_CR |= OPTPG;
+
+	*hword = ((~value) << STM32_OPTB_COMPL_SHIFT) | value;
+
+	/* reset OPTPG bit */
+	STM32_FLASH_CR = OPTWRE;
+
+	/* wait to be ready  */
+	for (i = 0; (STM32_FLASH_SR & 1) && (i < FLASH_TIMEOUT_LOOP); i++)
+		;
+}
+
+void flash_physical_permanent_protect(void)
+{
+	unlock_erase_optb();
+	/* protect the 16KB RO partition against write/erase in WRP0 */
+	write_optb(8, 0xF0);
+	/* Set RDP to level 1 to prevent disabling the protection */
+	write_optb(0, 0x11);
+	/* Reset by using OBL_LAUNCH to take changes into account */
+	asm volatile("cpsid i");
+	STM32_FLASH_CR |= STM32_FLASH_CR_OBL_LAUNCH;
+	/* Spin and wait for reboot; should never return */
+	while (1)
+		;
+}
+
+int flash_physical_is_permanently_protected(void)
+{
+	/* if RDP is still at level 0, the flash protection is not in place */
+	return (STM32_FLASH_OBR & STM32_FLASH_OBR_RDP_MASK) &&
+		/* the low 16KB (RO partition) are write-protected */
+		!(STM32_FLASH_WRPR & 0xF);
 }

@@ -10,6 +10,9 @@
 
 #include "common.h"
 
+/* PD Host command timeout */
+#define PD_HOST_COMMAND_TIMEOUT_US SECOND
+
 enum pd_errors {
 	PD_ERR_INVAL = -1,      /* Invalid packet */
 	PD_ERR_HARD_RESET = -2, /* Got a Hard-Reset packet */
@@ -73,6 +76,7 @@ enum pd_errors {
 
 /* RDO : Request Data Object */
 #define RDO_OBJ_POS(n)             (((n) & 0x7) << 28)
+#define RDO_POS(rdo)               (((rdo) >> 28) & 0x7)
 #define RDO_GIVE_BACK              (1 << 27)
 #define RDO_CAP_MISMATCH           (1 << 26)
 #define RDO_COMM_CAP               (1 << 25)
@@ -106,7 +110,6 @@ enum pd_errors {
 
 #define BDO(mode, cnt)      ((mode) | ((cnt) & 0xFFFF))
 
-/* TODO(tbroch) is there a finite number for these in the spec */
 #define SVID_DISCOVERY_MAX 16
 
 /* Timers */
@@ -118,8 +121,9 @@ enum pd_errors {
 #define PD_T_PS_TRANSITION    (500*MSEC) /* between 450ms and 550ms */
 #define PD_T_PS_SOURCE_ON     (480*MSEC) /* between 390ms and 480ms */
 #define PD_T_PS_SOURCE_OFF    (920*MSEC) /* between 750ms and 920ms */
-#define PD_T_DRP_HOLD         (120*MSEC) /* between 100ms and 150ms */
-#define PD_T_DRP_LOCK         (120*MSEC) /* between 100ms and 150ms */
+#define PD_T_PS_HARD_RESET     (15*MSEC) /* between 10ms and 20ms */
+#define PD_T_ERROR_RECOVERY    (25*MSEC) /* 25ms */
+#define PD_T_CC_DEBOUNCE       (100*MSEC) /* between 100ms and 200ms */
 /* DRP_SNK + DRP_SRC must be between 50ms and 100ms with 30%-70% duty cycle */
 #define PD_T_DRP_SNK           (40*MSEC) /* toggle time for sink DRP */
 #define PD_T_DRP_SRC           (30*MSEC) /* toggle time for source DRP */
@@ -129,6 +133,7 @@ enum pd_errors {
 #define PD_T_SRC_RECOVER_MAX (1000*MSEC) /* 1000ms */
 #define PD_T_SRC_TURN_ON      (275*MSEC) /* 275ms */
 #define PD_T_SAFE_0V          (650*MSEC) /* 650ms */
+#define PD_T_NO_RESPONSE     (5500*MSEC) /* between 4.5s and 5.5s */
 
 /* number of edges and time window to detect CC line is not idle */
 #define PD_RX_TRANSITION_COUNT  3
@@ -136,6 +141,13 @@ enum pd_errors {
 
 /* from USB Type-C Specification Table 5-1 */
 #define PD_T_AME (1*SECOND) /* timeout from UFP attach to Alt Mode Entry */
+
+/* VDM Timers ( USB PD Spec Rev2.0 Table 6-30 )*/
+#define PD_T_VDM_BUSY         (100*MSEC) /* at least 100ms */
+#define PD_T_VDM_E_MODE        (25*MSEC) /* enter/exit the same max */
+#define PD_T_VDM_RCVR_RSP      (15*MSEC) /* max of 15ms */
+#define PD_T_VDM_SNDR_RSP      (30*MSEC) /* max of 30ms */
+#define PD_T_VDM_WAIT_MODE_E  (100*MSEC) /* enter/exit the same max */
 
 /* function table for entered mode */
 struct amode_fx {
@@ -164,6 +176,7 @@ struct svdm_amode_fx {
 	int (*enter)(int port, uint32_t mode_caps);
 	int (*status)(int port, uint32_t *payload);
 	int (*config)(int port, uint32_t *payload);
+	void (*post_config)(int port);
 	int (*attention)(int port, uint32_t *payload);
 	void (*exit)(int port);
 };
@@ -175,10 +188,13 @@ extern const struct svdm_response svdm_rsp;
 extern const struct svdm_amode_fx supported_modes[];
 extern const int supported_modes_cnt;
 
+/* DFP data needed to support alternate mode entry and exit */
 struct svdm_amode_data {
 	const struct svdm_amode_fx *fx;
-	int index;
-	uint32_t mode_caps;
+	/* VDM object position */
+	int opos;
+	/* mode capabilities specific to SVID amode. */
+	struct svdm_svid_data *data;
 };
 
 enum hpd_event {
@@ -186,6 +202,18 @@ enum hpd_event {
 	hpd_low,
 	hpd_high,
 	hpd_irq,
+};
+
+/* DisplayPort flags */
+#define DP_FLAGS_DP_ON              (1 << 0) /* Display port mode is on */
+#define DP_FLAGS_HPD_HI_PENDING     (1 << 1) /* Pending HPD_HI */
+
+/* supported alternate modes */
+enum pd_alternate_modes {
+	PD_AMODE_GOOGLE,
+	PD_AMODE_DISPLAYPORT,
+	/* not a real mode */
+	PD_AMODE_COUNT,
 };
 
 /* Policy structure for driving alternate mode */
@@ -198,8 +226,10 @@ struct pd_policy {
 	uint32_t identity[PDO_MAX_OBJECTS - 1];
 	/* supported svids & corresponding vdo mode data */
 	struct svdm_svid_data svids[SVID_DISCOVERY_MAX];
-	/*  active mode */
-	struct svdm_amode_data amode;
+	/*  active modes */
+	struct svdm_amode_data amodes[PD_AMODE_COUNT];
+	/* Next index to insert DFP alternate mode into amodes */
+	int amode_idx;
 };
 
 /*
@@ -264,6 +294,7 @@ struct pd_policy {
 #define VDO_CMD_PING_ENABLE  VDO_CMD_VENDOR(10)
 #define VDO_CMD_CURRENT      VDO_CMD_VENDOR(11)
 #define VDO_CMD_FLIP         VDO_CMD_VENDOR(12)
+#define VDO_CMD_GET_LOG      VDO_CMD_VENDOR(13)
 
 #define PD_VDO_VID(vdo)  ((vdo) >> 16)
 #define PD_VDO_SVDM(vdo) (((vdo) >> 15) & 1)
@@ -548,7 +579,7 @@ struct pd_policy {
 #define USB_VID_BIZLINK 0x06C4
 
 /* Timeout for message receive in microseconds */
-#define USB_PD_RX_TMOUT_US 2700
+#define USB_PD_RX_TMOUT_US 1800
 
 /* --- Protocol layer functions --- */
 
@@ -557,6 +588,7 @@ enum pd_states {
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 	PD_STATE_SUSPENDED,
 	PD_STATE_SNK_DISCONNECTED,
+	PD_STATE_SNK_DISCONNECTED_DEBOUNCE,
 	PD_STATE_SNK_HARD_RESET_RECOVER,
 	PD_STATE_SNK_DISCOVERY,
 	PD_STATE_SNK_REQUESTED,
@@ -572,6 +604,8 @@ enum pd_states {
 #endif /* CONFIG_USB_PD_DUAL_ROLE */
 
 	PD_STATE_SRC_DISCONNECTED,
+	PD_STATE_SRC_DISCONNECTED_DEBOUNCE,
+	PD_STATE_SRC_ACCESSORY,
 	PD_STATE_SRC_HARD_RESET_RECOVER,
 	PD_STATE_SRC_STARTUP,
 	PD_STATE_SRC_DISCOVERY,
@@ -580,6 +614,7 @@ enum pd_states {
 	PD_STATE_SRC_POWERED,
 	PD_STATE_SRC_TRANSITION,
 	PD_STATE_SRC_READY,
+	PD_STATE_SRC_GET_SINK_CAP,
 	PD_STATE_SRC_DR_SWAP,
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
@@ -592,10 +627,25 @@ enum pd_states {
 	PD_STATE_SOFT_RESET,
 	PD_STATE_HARD_RESET_SEND,
 	PD_STATE_HARD_RESET_EXECUTE,
+#ifdef CONFIG_COMMON_RUNTIME
 	PD_STATE_BIST,
+#endif
 
 	/* Number of states. Not an actual state. */
 	PD_STATE_COUNT,
+};
+
+enum pd_cc_states {
+	PD_CC_NONE,
+
+	/* From DFP perspective */
+	PD_CC_NO_UFP,
+	PD_CC_AUDIO_ACC,
+	PD_CC_DEBUG_ACC,
+	PD_CC_UFP_ATTACHED,
+
+	/* From UFP perspective */
+	PD_CC_DFP_ATTACHED
 };
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
@@ -605,6 +655,12 @@ enum pd_dual_role_states {
 	PD_DRP_FORCE_SINK,
 	PD_DRP_FORCE_SOURCE
 };
+/**
+ * Get dual role state
+ *
+ * @return Current dual-role state, from enum pd_dual_role_states
+ */
+enum pd_dual_role_states pd_get_dual_role(void);
 /**
  * Set dual role state, from among enum pd_dual_role_states
  *
@@ -708,6 +764,14 @@ int pd_build_request(int cnt, uint32_t *src_caps, uint32_t *rdo,
 		     uint32_t *ma, uint32_t *mv, enum pd_request_type req_type);
 
 /**
+ * Check if max voltage request is allowed (only used if
+ * CONFIG_USB_PD_CHECK_MAX_REQUEST_ALLOWED is defined).
+ *
+ * @return True if max voltage request allowed, False otherwise
+ */
+int pd_is_max_request_allowed(void);
+
+/**
  * Process source capabilities packet
  *
  * @param port USB-C port number
@@ -727,6 +791,14 @@ void pd_set_max_voltage(unsigned mv);
  * @return max voltage
  */
 unsigned pd_get_max_voltage(void);
+
+/**
+ * Check if this board supports the given input voltage.
+ *
+ * @mv input voltage
+ * @return 1 if voltage supported, 0 if not
+ */
+int pd_is_valid_input_voltage(int mv);
 
 /**
  * Request a new operating voltage.
@@ -812,16 +884,22 @@ int pd_check_power_swap(int port);
 int pd_check_data_swap(int port, int data_role);
 
 /**
- * A new power contract has been established
+ * Check current power role for potential power swap
  *
  * @param port USB-C port number
  * @param pr_role Our power role
- * @param dr_role Our data role
  * @param partner_pr_swap Partner supports PR_SWAP
+ */
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap);
+
+/**
+ * Check current data role for potential data swap
+ *
+ * @param port USB-C port number
+ * @param dr_role Our data role
  * @param partner_dr_swap Partner supports DR_SWAP
  */
-void pd_new_contract(int port, int pr_role, int dr_role,
-		     int partner_pr_swap, int partner_dr_swap);
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap);
 
 /**
  * Execute data swap.
@@ -847,7 +925,7 @@ void pd_get_info(uint32_t *info_data);
  * @param rpayload pointer to the data to send back.
  * @return if >0, number of VDOs to send back.
  */
-int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload);
+int pd_custom_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload);
 
 /**
  * Handle Structured Vendor Defined Messages
@@ -871,13 +949,39 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload);
 int pd_custom_flash_vdm(int port, int cnt, uint32_t *payload);
 
 /**
- * Exit alternate mode
+ * Enter alternate mode on DFP
  *
  * @param port     USB-C port number
- * @param payload  payload data.
- * @return if >0, number of VDOs to send back.
+ * @param svid USB standard or vendor id to exit or zero for DFP amode reset.
+ * @param opos object position of mode to exit.
+ * @return vdm for UFP to be sent to enter mode or zero if not.
  */
-int pd_exit_mode(int port, uint32_t *payload);
+uint32_t pd_dfp_enter_mode(int port, uint16_t svid, int opos);
+
+/**
+ * Exit alternate mode on DFP
+ *
+ * @param port USB-C port number
+ * @param svid USB standard or vendor id to exit or zero for DFP amode reset.
+ * @param opos object position of mode to exit.
+ * @return 1 if UFP should be sent exit mode VDM.
+ */
+int pd_dfp_exit_mode(int port, uint16_t svid, int opos);
+
+/**
+ * Initialize policy engine for DFP
+ *
+ * @param port     USB-C port number
+ */
+void pd_dfp_pe_init(int port);
+
+/**
+ * Return the VID of the USB PD accessory connected to a specified port
+ *
+ * @param port  USB-C port number
+ * @return      the USB Vendor Identifier or 0 if it doesn't exist
+ */
+uint16_t pd_get_identity_vid(int port);
 
 /**
  * Store Device ID & RW hash of device
@@ -886,9 +990,28 @@ int pd_exit_mode(int port, uint32_t *payload);
  * @param dev_id		device identifier
  * @param rw_hash		pointer to rw_hash
  * @param current_image		current image: RW or RO
+ * @return			true if the dev / hash match an existing hash
+ *				in our table, false otherwise
  */
-void pd_dev_store_rw_hash(int port, uint16_t dev_id, uint32_t *rw_hash,
-			  uint32_t ec_current_image);
+int pd_dev_store_rw_hash(int port, uint16_t dev_id, uint32_t *rw_hash,
+			 uint32_t ec_current_image);
+
+/**
+ * Try to fetch one PD log entry from accessory
+ *
+ * @param port	USB-C accessory port number
+ * @return	EC_RES_SUCCESS if the VDM was sent properly else error code
+ */
+int pd_fetch_acc_log_entry(int port);
+
+/**
+ * Analyze the log entry received as the VDO_CMD_GET_LOG payload.
+ *
+ * @param port		USB-C accessory port number
+ * @param cnt		number of data objects in payload
+ * @param payload	payload data
+ */
+void pd_log_recv_vdm(int port, int cnt, uint32_t *payload);
 
 /**
  * Send Vendor Defined Message
@@ -960,9 +1083,10 @@ void board_flip_usb_mux(int port);
  * Determine if in alternate mode or not.
  *
  * @param port port number.
+ * @param svid USB standard or vendor id
  * @return object position of mode chosen in alternate mode otherwise zero.
  */
-int pd_alt_mode(int port);
+int pd_alt_mode(int port, uint16_t svid);
 
 /**
  * Send hpd over USB PD.
@@ -1165,13 +1289,6 @@ int pd_is_connected(int port);
 int pd_get_polarity(int port);
 
 /**
- * Get port partner dual-role capable status
- *
- * @param port USB-C port number
- */
-int pd_get_partner_dualrole_capable(int port);
-
-/**
  * Get port partner data swap capable status
  *
  * @param port USB-C port number
@@ -1223,5 +1340,33 @@ void pd_prepare_sysjump(void);
  * @param port USB-C port number
  */
 void pd_set_new_power_request(int port);
+
+/* ----- Logging ----- */
+#ifdef CONFIG_USB_PD_LOGGING
+/**
+ * Record one event in the PD logging FIFO.
+ *
+ * @param type event type as defined by PD_EVENT_xx in ec_commands.h
+ * @param size_port payload size and port num (defined by PD_LOG_PORT_SIZE)
+ * @param data type-defined information
+ * @param payload pointer to the optional payload (0..16 bytes)
+ */
+void pd_log_event(uint8_t type, uint8_t size_port,
+		  uint16_t data, void *payload);
+
+/**
+ * Retrieve one logged event and prepare a VDM with it.
+ *
+ * Used to answer the VDO_CMD_GET_LOG unstructured VDM.
+ *
+ * @param payload pointer to the payload data buffer (must be 7 words)
+ * @return number of 32-bit words in the VDM payload.
+ */
+int pd_vdm_get_log_entry(uint32_t *payload);
+#else  /* CONFIG_USB_PD_LOGGING */
+static inline void pd_log_event(uint8_t type, uint8_t size_port,
+				uint16_t data, void *payload) {}
+static inline int pd_vdm_get_log_entry(uint32_t *payload) { return 0; }
+#endif /* CONFIG_USB_PD_LOGGING */
 
 #endif  /* __USB_PD_H */

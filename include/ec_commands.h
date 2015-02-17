@@ -224,7 +224,8 @@ enum ec_status {
 	EC_RES_INVALID_HEADER = 12,     /* Header contains invalid data */
 	EC_RES_REQUEST_TRUNCATED = 13,  /* Didn't get the entire request */
 	EC_RES_RESPONSE_TOO_BIG = 14,   /* Response was too big to handle */
-	EC_RES_BUS_ERROR = 15           /* Communications bus error */
+	EC_RES_BUS_ERROR = 15,          /* Communications bus error */
+	EC_RES_BUSY = 16                /* Up but too busy.  Should retry */
 };
 
 /*
@@ -615,6 +616,10 @@ struct ec_params_read_memmap {
 
 struct ec_params_get_cmd_versions {
 	uint8_t cmd;      /* Command to check */
+} __packed;
+
+struct ec_params_get_cmd_versions_v1 {
+	uint16_t cmd;     /* Command to check */
 } __packed;
 
 struct ec_response_get_cmd_versions {
@@ -1017,6 +1022,8 @@ struct lightbar_params_v1 {
 	int32_t s3_sleep_for;
 	int32_t s3_ramp_up;
 	int32_t s3_ramp_down;
+	int32_t s5_ramp_up;
+	int32_t s5_ramp_down;
 	int32_t tap_tick_delay;
 	int32_t tap_gate_delay;
 	int32_t tap_display_time;
@@ -1046,6 +1053,9 @@ struct lightbar_params_v1 {
 	uint8_t s0_idx[2][LB_BATTERY_LEVELS];	/* AP is running */
 	uint8_t s3_idx[2][LB_BATTERY_LEVELS];	/* AP is sleeping */
 
+	/* s5: single color pulse on inhibited power-up */
+	uint8_t s5_idx;
+
 	/* Color palette */
 	struct rgb_s color[8];			/* 0-3 are Google colors */
 } __packed;
@@ -1063,7 +1073,7 @@ struct ec_params_lightbar {
 		struct {
 			/* no args */
 		} dump, off, on, init, get_seq, get_params_v0, get_params_v1,
-			version, get_brightness, get_demo;
+			version, get_brightness, get_demo, suspend, resume;
 
 		struct {
 			uint8_t num;
@@ -1080,6 +1090,10 @@ struct ec_params_lightbar {
 		struct {
 			uint8_t led;
 		} get_rgb;
+
+		struct {
+			uint8_t enable;
+		} manual_suspend_ctrl;
 
 		struct lightbar_params_v0 set_params_v0;
 		struct lightbar_params_v1 set_params_v1;
@@ -1117,7 +1131,7 @@ struct ec_response_lightbar {
 			/* no return params */
 		} off, on, init, set_brightness, seq, reg, set_rgb,
 			demo, set_params_v0, set_params_v1,
-			set_program;
+			set_program, manual_suspend_ctrl, suspend, resume;
 	};
 } __packed;
 
@@ -1142,6 +1156,9 @@ enum lightbar_command {
 	LIGHTBAR_CMD_GET_PARAMS_V1 = 16,
 	LIGHTBAR_CMD_SET_PARAMS_V1 = 17,
 	LIGHTBAR_CMD_SET_PROGRAM = 18,
+	LIGHTBAR_CMD_MANUAL_SUSPEND_CTRL = 19,
+	LIGHTBAR_CMD_SUSPEND = 20,
+	LIGHTBAR_CMD_RESUME = 21,
 	LIGHTBAR_NUM_CMDS
 };
 
@@ -2663,9 +2680,17 @@ struct ec_params_reboot_ec {
 /* EC to PD MCU exchange status command */
 #define EC_CMD_PD_EXCHANGE_STATUS 0x100
 
+enum pd_charge_state {
+	PD_CHARGE_NO_CHANGE = 0, /* Don't change charge state */
+	PD_CHARGE_NONE,          /* No charging allowed */
+	PD_CHARGE_5V,            /* 5V charging only */
+	PD_CHARGE_MAX            /* Charge at max voltage */
+};
+
 /* Status of EC being sent to PD */
 struct ec_params_pd_status {
-	int8_t batt_soc; /* battery state of charge */
+	int8_t batt_soc;      /* battery state of charge */
+	uint8_t charge_state; /* charging state (from enum pd_charge_state) */
 } __packed;
 
 /* Status of PD being sent back to EC */
@@ -2722,6 +2747,13 @@ struct ec_response_usb_pd_control {
 	uint8_t state;
 } __packed;
 
+struct ec_response_usb_pd_control_v1 {
+	uint8_t enabled;
+	uint8_t role; /* [0] power: 0=SNK/1=SRC [1] data: 0=UFP/1=DFP */
+	uint8_t polarity;
+	char state[32];
+} __packed;
+
 #define EC_CMD_USB_PD_PORTS 0x102
 
 struct ec_response_usb_pd_ports {
@@ -2752,14 +2784,22 @@ enum usb_power_roles {
 	USB_PD_PORT_POWER_SINK_NOT_CHARGING,
 };
 
+struct usb_chg_measures {
+	uint16_t voltage_max;
+	uint16_t voltage_now;
+	uint16_t current_max;
+	/*
+	 * this structure is used below in struct ec_response_usb_pd_power_info,
+	 * and currently expects an odd number of uint16_t for alignment.
+	 */
+} __packed;
+
 struct ec_response_usb_pd_power_info {
 	uint8_t role;
 	uint8_t type;
 	uint8_t dualrole;
 	uint8_t reserved1;
-	uint16_t voltage_max;
-	uint16_t voltage_now;
-	uint16_t current_max;
+	struct usb_chg_measures meas;
 	uint16_t reserved2;
 	uint32_t max_power;
 } __packed;
@@ -2821,6 +2861,133 @@ enum usb_pd_override_ports {
 struct ec_params_charge_port_override {
 	int16_t override_port; /* Override port# */
 } __packed;
+
+/* Read (and delete) one entry of PD event log */
+#define EC_CMD_PD_GET_LOG_ENTRY 0x115
+
+struct ec_response_pd_log {
+	uint32_t timestamp; /* relative timestamp in milliseconds */
+	uint8_t type;       /* event type : see PD_EVENT_xx below */
+	uint8_t size_port;  /* [7:5] port number [4:0] payload size in bytes */
+	uint16_t data;      /* type-defined data payload */
+	uint8_t payload[0]; /* optional additional data payload: 0..16 bytes */
+} __packed;
+
+
+/* The timestamp is the microsecond counter shifted to get about a ms. */
+#define PD_LOG_TIMESTAMP_SHIFT 10 /* 1 LSB = 1024us */
+
+#define PD_LOG_SIZE_MASK  0x1F
+#define PD_LOG_PORT_MASK  0xE0
+#define PD_LOG_PORT_SHIFT    5
+#define PD_LOG_PORT_SIZE(port, size) (((port) << PD_LOG_PORT_SHIFT) | \
+				      ((size) & PD_LOG_SIZE_MASK))
+#define PD_LOG_PORT(size_port) ((size_port) >> PD_LOG_PORT_SHIFT)
+#define PD_LOG_SIZE(size_port) ((size_port) & PD_LOG_SIZE_MASK)
+
+/* PD event log : entry types */
+/* PD MCU events */
+#define PD_EVENT_MCU_BASE       0x00
+#define PD_EVENT_MCU_CHARGE             (PD_EVENT_MCU_BASE+0)
+#define PD_EVENT_MCU_CONNECT            (PD_EVENT_MCU_BASE+1)
+/* Reserved for custom board event */
+#define PD_EVENT_MCU_BOARD_CUSTOM       (PD_EVENT_MCU_BASE+2)
+/* PD generic accessory events */
+#define PD_EVENT_ACC_BASE       0x20
+#define PD_EVENT_ACC_RW_FAIL   (PD_EVENT_ACC_BASE+0)
+#define PD_EVENT_ACC_RW_ERASE  (PD_EVENT_ACC_BASE+1)
+/* PD power supply events */
+#define PD_EVENT_PS_BASE        0x40
+#define PD_EVENT_PS_FAULT      (PD_EVENT_PS_BASE+0)
+/* PD video dongles events */
+#define PD_EVENT_VIDEO_BASE     0x60
+#define PD_EVENT_VIDEO_DP_MODE (PD_EVENT_VIDEO_BASE+0)
+#define PD_EVENT_VIDEO_CODEC   (PD_EVENT_VIDEO_BASE+1)
+/* Returned in the "type" field, when there is no entry available */
+#define PD_EVENT_NO_ENTRY       0xFF
+
+/*
+ * PD_EVENT_MCU_CHARGE event definition :
+ * the payload is "struct usb_chg_measures"
+ * the data field contains the port state flags as defined below :
+ */
+/* Port partner is a dual role device */
+#define CHARGE_FLAGS_DUAL_ROLE         (1 << 15)
+/* Port is the pending override port */
+#define CHARGE_FLAGS_DELAYED_OVERRIDE  (1 << 14)
+/* Port is the override port */
+#define CHARGE_FLAGS_OVERRIDE          (1 << 13)
+/* Charger type */
+#define CHARGE_FLAGS_TYPE_SHIFT               3
+#define CHARGE_FLAGS_TYPE_MASK       (0xF << CHARGE_FLAGS_TYPE_SHIFT)
+/* Power delivery role */
+#define CHARGE_FLAGS_ROLE_MASK         (7 <<  0)
+
+/*
+ * PD_EVENT_PS_FAULT data field flags definition :
+ */
+#define PS_FAULT_OCP                          1
+#define PS_FAULT_FAST_OCP                     2
+#define PS_FAULT_OVP                          3
+#define PS_FAULT_DISCH                        4
+
+/*
+ * PD_EVENT_VIDEO_CODEC payload is "struct mcdp_info".
+ */
+struct mcdp_version {
+	uint8_t major;
+	uint8_t minor;
+	uint16_t build;
+} __packed;
+
+struct mcdp_info {
+	uint8_t family[2];
+	uint8_t chipid[2];
+	struct mcdp_version irom;
+	struct mcdp_version fw;
+} __packed;
+
+/* struct mcdp_info field decoding */
+#define MCDP_CHIPID(chipid) ((chipid[0] << 8) | chipid[1])
+#define MCDP_FAMILY(family) ((family[0] << 8) | family[1])
+
+/* Get/Set USB-PD Alternate mode info */
+#define EC_CMD_USB_PD_GET_AMODE 0x116
+struct ec_params_usb_pd_get_mode_request {
+	uint16_t svid_idx; /* SVID index to get */
+	uint8_t port;      /* port */
+} __packed;
+
+struct ec_params_usb_pd_get_mode_response {
+	uint16_t svid;   /* SVID */
+	uint16_t opos;    /* Object Position */
+	uint32_t vdo[6]; /* Mode VDOs */
+} __packed;
+
+#define EC_CMD_USB_PD_SET_AMODE 0x117
+
+enum pd_mode_cmd {
+	PD_EXIT_MODE = 0,
+	PD_ENTER_MODE = 1,
+	/* Not a command.  Do NOT remove. */
+	PD_MODE_CMD_COUNT,
+};
+
+struct ec_params_usb_pd_set_mode_request {
+	uint32_t cmd;  /* enum pd_mode_cmd */
+	uint16_t svid; /* SVID to set */
+	uint8_t opos;  /* Object Position */
+	uint8_t port;  /* port */
+} __packed;
+
+/* Ask the PD MCU to record a log of a requested type */
+#define EC_CMD_PD_WRITE_LOG_ENTRY 0x117
+
+struct ec_params_pd_write_log_entry {
+	uint8_t type; /* event type : see PD_EVENT_xx above */
+	uint8_t port; /* port#, or 0 for events unrelated to a given port */
+} __packed;
+
 #endif  /* !__ACPI__ */
 
 /*****************************************************************************/

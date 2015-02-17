@@ -23,7 +23,11 @@
 #define CPRINTF(format, args...) cprintf(CC_GESTURE, format, ## args)
 
 /* Output datarate for tap sensor (in milli-Hz) */
-#define TAP_ODR (1000000 / CONFIG_GESTURE_SAMPLING_INTERVAL_MS)
+/*
+ * Note: lsm6ds0 accel needs twice the expected data rate in order to guarantee
+ * that we have a new data sample every reading.
+ */
+#define TAP_ODR (2 * (1000000 / CONFIG_GESTURE_SAMPLING_INTERVAL_MS))
 
 /*
  * Double tap detection parameters
@@ -172,7 +176,8 @@ static int gesture_tap_for_battery(void)
 	switch (state) {
 	case TAP_IDLE:
 		/* Look for a sudden increase in Z movement */
-		if (delta_z_inner > 13 * delta_z_outer &&
+		if (delta_z_inner > 30000 &&
+		    delta_z_inner > 13 * delta_z_outer &&
 		    delta_z_inner > 1 * delta_xy_inner) {
 			delta_z_inner_max = delta_z_inner;
 			state_cnt = 0;

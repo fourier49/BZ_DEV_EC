@@ -47,7 +47,7 @@
 static void pd_mcu_interrupt(enum gpio_signal signal)
 {
 	/* Exchange status with PD MCU. */
-	host_command_pd_send_status();
+	host_command_pd_send_status(PD_CHARGE_NO_CHANGE);
 }
 
 #include "gpio_list.h"
@@ -75,18 +75,6 @@ const struct adc_t adc_channels[] = {
 	 */
 	{"ECTemp", LM4_ADC_SEQ0, -225, ADC_READ_MAX, 420,
 	 LM4_AIN_NONE, 0x0e /* TS0 | IE0 | END0 */, 0, 0},
-
-	/*
-	 * The charger current is measured with a 0.005-ohm
-	 * resistor. IBAT is 20X the voltage across that resistor when
-	 * charging, and either 8X or 16X (default) when discharging, if it's
-	 * even enabled (default is not). Nothing looks at this except the
-	 * console command, so let's just leave it at unity gain. The ADC
-	 * returns 0x000-0xFFF for 0.0-3.3V. You do the math.
-	 */
-	{"ChargerCurrent", LM4_ADC_SEQ1, 1, 1, 0,
-	 LM4_AIN(11), 0x06 /* IE0 | END0 */, LM4_GPIO_B, (1<<5)},
-
 	/*
 	 * TODO(crosbug.com/p/23827): We don't know what to expect here, but
 	 * it's an analog input that's pulled high. We're using it as a battery
@@ -178,7 +166,7 @@ BUILD_ASSERT(ARRAY_SIZE(temp_sensors) == TEMP_SENSOR_COUNT);
 
 /* ALS instances. Must be in same order as enum als_id. */
 struct als_t als[] = {
-	{"ISL", isl29035_read_lux},
+	{"ISL", isl29035_read_lux, 5},
 };
 BUILD_ASSERT(ARRAY_SIZE(als) == ALS_COUNT);
 
@@ -187,20 +175,21 @@ BUILD_ASSERT(ARRAY_SIZE(als) == ALS_COUNT);
  * same order as enum temp_sensor_id. To always ignore any temp, use 0.
  */
 struct ec_thermal_config thermal_params[] = {
-	/* Only the AP affects the thermal limits and fan speed. */
-	{{C_TO_K(95), C_TO_K(97), C_TO_K(99)}, C_TO_K(43), C_TO_K(85)},
+	/* {Twarn, Thigh, Thalt}, fan_off, fan_max */
+	{{C_TO_K(95), C_TO_K(101), C_TO_K(104)},
+	 C_TO_K(55), C_TO_K(90)},		/* PECI */
+	{{0, 0, 0}, 0, 0},			/* EC */
+	{{0, 0, 0}, C_TO_K(41), C_TO_K(55)},	/* Charger die */
 	{{0, 0, 0}, 0, 0},
+	{{0, 0, 0}, C_TO_K(35), C_TO_K(49)},	/* CPU die */
 	{{0, 0, 0}, 0, 0},
+	{{0, 0, 0}, 0, 0},			/* Left C die */
 	{{0, 0, 0}, 0, 0},
+	{{0, 0, 0}, 0, 0},			/* Right C die */
 	{{0, 0, 0}, 0, 0},
+	{{0, 0, 0}, 0, 0},			/* Right D die */
 	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
-	{{0, 0, 0}, 0, 0},
+	{{0, 0, 0}, C_TO_K(43), C_TO_K(54)},	/* Left D die */
 	{{0, 0, 0}, 0, 0},
 };
 BUILD_ASSERT(ARRAY_SIZE(thermal_params) == TEMP_SENSOR_COUNT);
@@ -241,15 +230,6 @@ enum battery_present battery_is_present(void)
 #endif
 
 /**
- * Show battery status on lightbar when AC status changes
- */
-void show_battery_status(void)
-{
-	lightbar_sequence(LIGHTBAR_TAP);
-}
-DECLARE_HOOK(HOOK_AC_CHANGE, show_battery_status, HOOK_PRIO_DEFAULT);
-
-/**
  * Discharge battery when on AC power for factory test.
  */
 int board_discharge_on_ac(int enable)
@@ -269,15 +249,15 @@ struct kxcj9_data g_kxcj9_data;
 /* Four Motion sensors */
 /* Matrix to rotate accelrator into standard reference frame */
 const matrix_3x3_t base_standard_ref = {
-	{-1,  0,  0},
-	{ 0, -1,  0},
-	{ 0,  0, -1}
+	{FLOAT_TO_FP(-1),  0,  0},
+	{ 0, FLOAT_TO_FP(-1),  0},
+	{ 0,  0, FLOAT_TO_FP(-1)}
 };
 
 const matrix_3x3_t lid_standard_ref = {
-	{ 0,  1,  0},
-	{-1,  0,  0},
-	{ 0,  0, -1}
+	{ 0,  FLOAT_TO_FP(1),  0},
+	{FLOAT_TO_FP(-1),  0,  0},
+	{ 0,  0, FLOAT_TO_FP(-1)}
 };
 
 struct motion_sensor_t motion_sensors[] = {
@@ -309,14 +289,14 @@ const unsigned int motion_sensor_count = ARRAY_SIZE(motion_sensors);
 const struct accel_orientation acc_orient = {
 	/* Hinge aligns with y axis. */
 	.rot_hinge_90 = {
-		{ 1,  0,  0},
-		{ 0,  1,  0},
-		{ 0,  0,  1}
+		{ FLOAT_TO_FP(1),  0,  0},
+		{ 0,  FLOAT_TO_FP(1),  0},
+		{ 0,  0,  FLOAT_TO_FP(1)}
 	},
 	.rot_hinge_180 = {
-		{ 1,  0,  0},
-		{ 0,  1,  0},
-		{ 0,  0,  1}
+		{ FLOAT_TO_FP(1),  0,  0},
+		{ 0,  FLOAT_TO_FP(1),  0},
+		{ 0,  0,  FLOAT_TO_FP(1)}
 	},
 	.hinge_axis = {0, 1, 0},
 };

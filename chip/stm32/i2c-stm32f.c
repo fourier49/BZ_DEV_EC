@@ -343,6 +343,9 @@ static void i2c_init_port(unsigned int port)
 
 		/* enable I2C2 clock */
 		STM32_RCC_APB1ENR |= 1 << i2c_clock_bit[port];
+
+		/* Delay 1 APB clock cycle after the clock is enabled */
+		clock_wait_bus_cycles(BUS_APB, 1);
 	}
 
 	/* force reset of the i2c peripheral */
@@ -380,7 +383,7 @@ static void i2c_init(void)
 	task_enable_irq(STM32_IRQ_I2C2_EV);
 	task_enable_irq(STM32_IRQ_I2C2_ER);
 }
-DECLARE_HOOK(HOOK_INIT, i2c_init, HOOK_PRIO_DEFAULT);
+DECLARE_HOOK(HOOK_INIT, i2c_init, HOOK_PRIO_INIT_I2C);
 
 /*****************************************************************************/
 /* STM32 Host I2C */

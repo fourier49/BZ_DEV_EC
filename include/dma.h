@@ -65,6 +65,9 @@ void dma_start_rx(const struct dma_option *option, unsigned count,
  */
 void dma_disable(enum dma_channel channel);
 
+/* Stop transfers on all DMA channels */
+void dma_disable_all(void);
+
 /**
  * Get the number of bytes available to read, or number of bytes written
  *
@@ -115,11 +118,25 @@ void dma_test(void);
 void dma_clear_isr(enum dma_channel channel);
 
 /**
- * Enable "Transfer Complete" interrupt for a DMA channel
+ * Enable "Transfer Complete" interrupt for a DMA channel.
+ * Will Wake up calling task when complete.
  *
  * @param channel	Which channel's interrupts to change
  */
 void dma_enable_tc_interrupt(enum dma_channel channel);
+
+/**
+ * Enable "Transfer Complete" interrupt for a DMA channel with callback
+ * NOTE: The callback is run at highest interrupt priority so should be
+ * fast and not depend on get_time().
+ *
+ * @param channel	Which channel's interrupts to change
+ * @param callback	Pointer to callback function to call on interrupt
+ * @param callback_data Data to pass through to callback function
+ */
+void dma_enable_tc_interrupt_callback(enum dma_channel channel,
+				      void (*callback)(void *),
+				      void *callback_data);
 
 /**
  * Disable "Transfer Complete" interrupt for a DMA channel

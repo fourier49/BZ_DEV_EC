@@ -6,11 +6,12 @@
 #include <ctype.h>
 #include <errno.h>
 #include <getopt.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/io.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "battery.h"
@@ -98,7 +99,7 @@ const char help_str[] =
 	"      Erases EC flash\n"
 	"  flashinfo\n"
 	"      Prints information on the EC flash\n"
-	"  flashpd\n"
+	"  flashpd <dev_id> <port> <filename>\n"
 	"      Flash commands over PD\n"
 	"  flashprotect [now] [enable | disable]\n"
 	"      Prints or sets EC flash protection state\n"
@@ -138,6 +139,14 @@ const char help_str[] =
 	"      Prints saved panic info\n"
 	"  pause_in_s5 [on|off]\n"
 	"      Whether or not the AP should pause in S5 on shutdown\n"
+	"  pdlog\n"
+	"      Prints the PD event log entries\n"
+	"  pdwritelog <type> <port>\n"
+	"      Writes a PD event log of the given <type>\n"
+	"  pdgetmode <port>\n"
+	"      Get All USB-PD alternate SVIDs and modes on <port>\n"
+	"  pdsetmode <port> <svid> <opos>\n"
+	"      Set USB-PD alternate SVID and mode on <port>\n"
 	"  port80flood\n"
 	"      Rapidly write bytes to port 80\n"
 	"  port80read\n"
@@ -830,10 +839,87 @@ int cmd_rw_hash_pd(int argc, char *argv[])
 	return rv;
 }
 
+/**
+ * determine if in GFU mode or not.
+ *
+ * NOTE, Sends HOST commands that modify ec_outbuf contents.
+ *
+ * @opos return value of GFU mode object position or zero if not found
+ * @port port number to query
+ * @return 1 if in GFU mode, 0 if not, -1 if error
+ */
+static int in_gfu_mode(int *opos, int port)
+{
+	int i;
+	struct ec_params_usb_pd_get_mode_request *p =
+		(struct ec_params_usb_pd_get_mode_request *)ec_outbuf;
+	struct ec_params_usb_pd_get_mode_response *r =
+		(struct ec_params_usb_pd_get_mode_response *)ec_inbuf;
+	p->port = port;
+	p->svid_idx = 0;
+	do {
+		ec_command(EC_CMD_USB_PD_GET_AMODE, 0, p, sizeof(*p),
+			   ec_inbuf, ec_max_insize);
+		if (!r->svid || (r->svid == USB_VID_GOOGLE))
+			break;
+		p->svid_idx++;
+	} while (p->svid_idx < SVID_DISCOVERY_MAX);
+
+	if (r->svid != USB_VID_GOOGLE) {
+		fprintf(stderr, "Google VID not returned\n");
+		return -1;
+	}
+
+	*opos = 0; /* invalid ... must be 1 thru 6 */
+	for (i = 0; i < PDO_MODES; i++) {
+		if (r->vdo[i] == MODE_GOOGLE_FU) {
+			*opos = i + 1;
+			break;
+		}
+	}
+
+	return r->opos == *opos;
+}
+
+/**
+ * Enter GFU mode.
+ *
+ * NOTE, Sends HOST commands that modify ec_outbuf contents.
+ *
+ * @port port number to enter GFU on.
+ * @return 1 if entered GFU mode, 0 if not, -1 if error
+ */
+static int enter_gfu_mode(int port)
+{
+	int opos;
+	struct ec_params_usb_pd_set_mode_request *p =
+		(struct ec_params_usb_pd_set_mode_request *)ec_outbuf;
+	int gfu_mode = in_gfu_mode(&opos, port);
+
+	if (gfu_mode < 0) {
+		fprintf(stderr, "Failed to query GFU mode support\n");
+		return 0;
+	} else if (!gfu_mode) {
+		if (!opos) {
+			fprintf(stderr, "Invalid object position %d\n", opos);
+			return 0;
+		}
+		p->port = port;
+		p->svid = USB_VID_GOOGLE;
+		p->opos = opos;
+		p->cmd = PD_ENTER_MODE;
+
+		ec_command(EC_CMD_USB_PD_SET_AMODE, 0, p, sizeof(*p),
+			   NULL, 0);
+		usleep(500000); /* sleep to allow time for set mode */
+		gfu_mode = in_gfu_mode(&opos, port);
+	}
+	return gfu_mode;
+}
 
 int cmd_pd_device_info(int argc, char *argv[])
 {
-	int i, rv;
+	int i, rv, port;
 	char *e;
 	struct ec_params_usb_pd_info_request *p =
 		(struct ec_params_usb_pd_info_request *)ec_outbuf;
@@ -846,22 +932,42 @@ int cmd_pd_device_info(int argc, char *argv[])
 		return -1;
 	}
 
-	p->port = strtol(argv[1], &e, 0);
+	port = strtol(argv[1], &e, 0);
 	if (e && *e) {
 		fprintf(stderr, "Bad port\n");
 		return -1;
 	}
 
+	p->port = port;
+	r1 = (struct ec_params_usb_pd_discovery_entry *)ec_inbuf;
+	rv = ec_command(EC_CMD_USB_PD_DISCOVERY, 0, p, sizeof(*p),
+			ec_inbuf, ec_max_insize);
+	if (rv < 0)
+		return rv;
+
+	if (!r1->vid)
+		printf("Port:%d has no discovered device\n", port);
+	else {
+		printf("Port:%d ptype:%d vid:0x%04x pid:0x%04x\n", port,
+		       r1->ptype, r1->vid, r1->pid);
+	}
+
+	if (enter_gfu_mode(port) != 1) {
+		fprintf(stderr, "Failed to enter GFU mode\n");
+		return -1;
+	}
+
+	p->port = port;
 	rv = ec_command(EC_CMD_USB_PD_DEV_INFO, 0, p, sizeof(*p),
 			ec_inbuf, ec_max_insize);
 	if (rv < 0)
 		return rv;
 
 	if (!r0->dev_id)
-		printf("Port:%d has no valid device\n", p->port);
+		printf("Port:%d has no valid device\n", port);
 	else {
 		uint8_t *rwp = r0->dev_rw_hash;
-		printf("Port:%d DevId:%d.%d Hash:", p->port,
+		printf("Port:%d DevId:%d.%d Hash:", port,
 		       HW_DEV_ID_MAJ(r0->dev_id), HW_DEV_ID_MIN(r0->dev_id));
 		for (i = 0; i < 5; i++) {
 			printf(" 0x%02x%02x%02x%02x", rwp[3], rwp[2], rwp[1],
@@ -871,19 +977,6 @@ int cmd_pd_device_info(int argc, char *argv[])
 		printf(" CurImg:%s\n", image_names[r0->current_image]);
 	}
 
-	r1 = (struct ec_params_usb_pd_discovery_entry *)ec_inbuf;
-	rv = ec_command(EC_CMD_USB_PD_DISCOVERY, 0, p, sizeof(*p),
-			ec_inbuf, ec_max_insize);
-	if (rv < 0)
-		return rv;
-
-	if (!r1->vid)
-		printf("Port:%d has no discovered device\n", p->port);
-	else {
-		printf("Port:%d ptype:%d vid:0x%04x pid:0x%04x\n", p->port,
-		       r1->ptype, r1->vid, r1->pid);
-	}
-
 	return rv;
 }
 
@@ -891,7 +984,7 @@ int cmd_flash_pd(int argc, char *argv[])
 {
 	struct ec_params_usb_pd_fw_update *p =
 		(struct ec_params_usb_pd_fw_update *)ec_outbuf;
-	int i;
+	int i, dev_id, port;
 	int rv, fsize, step = 96;
 	char *e;
 	char *buf;
@@ -903,15 +996,20 @@ int cmd_flash_pd(int argc, char *argv[])
 		return -1;
 	}
 
-	p->dev_id = strtol(argv[1], &e, 0);
+	dev_id = strtol(argv[1], &e, 0);
 	if (e && *e) {
 		fprintf(stderr, "Bad device ID\n");
 		return -1;
 	}
 
-	p->port = strtol(argv[2], &e, 0);
+	port = strtol(argv[2], &e, 0);
 	if (e && *e) {
 		fprintf(stderr, "Bad port\n");
+		return -1;
+	}
+
+	if (enter_gfu_mode(port) != 1) {
+		fprintf(stderr, "Failed to enter GFU mode\n");
 		return -1;
 	}
 
@@ -922,6 +1020,8 @@ int cmd_flash_pd(int argc, char *argv[])
 
 	/* Erase the current RW RSA signature */
 	fprintf(stderr, "Erasing expected RW hash\n");
+	p->dev_id = dev_id;
+	p->port = port;
 	p->cmd = USB_PD_FW_ERASE_SIG;
 	p->size = 0;
 	rv = ec_command(EC_CMD_USB_PD_FW_UPDATE, 0,
@@ -932,6 +1032,8 @@ int cmd_flash_pd(int argc, char *argv[])
 
 	/* Reboot */
 	fprintf(stderr, "Rebooting\n");
+	p->dev_id = dev_id;
+	p->port = port;
 	p->cmd = USB_PD_FW_REBOOT;
 	p->size = 0;
 	rv = ec_command(EC_CMD_USB_PD_FW_UPDATE, 0,
@@ -942,18 +1044,31 @@ int cmd_flash_pd(int argc, char *argv[])
 
 	usleep(3000000); /* 3sec to reboot and get CC line idle */
 
+	/* re-enter GFU after reboot */
+	if (enter_gfu_mode(port) != 1) {
+		fprintf(stderr, "Failed to enter GFU mode\n");
+		goto pd_flash_error;
+	}
+
 	/* Erase RW flash */
 	fprintf(stderr, "Erasing RW flash\n");
+	p->dev_id = dev_id;
+	p->port = port;
 	p->cmd = USB_PD_FW_FLASH_ERASE;
 	p->size = 0;
 	rv = ec_command(EC_CMD_USB_PD_FW_UPDATE, 0,
 			p, p->size + sizeof(*p), NULL, 0);
+
+	/* 3 secs should allow ample time for 2KB page erases at 40ms */
+	usleep(3000000);
 
 	if (rv < 0)
 		goto pd_flash_error;
 
 	/* Write RW flash */
 	fprintf(stderr, "Writing RW flash\n");
+	p->dev_id = dev_id;
+	p->port = port;
 	p->cmd = USB_PD_FW_FLASH_WRITE;
 	p->size = step;
 
@@ -995,6 +1110,84 @@ pd_flash_error:
 	return -1;
 }
 
+int cmd_pd_set_amode(int argc, char *argv[])
+{
+	char *e;
+	struct ec_params_usb_pd_set_mode_request *p =
+		(struct ec_params_usb_pd_set_mode_request *)ec_outbuf;
+
+	if (argc < 5) {
+		fprintf(stderr, "Usage: %s <port> <svid> <opos> <cmd>\n",
+			argv[0]);
+		return -1;
+	}
+
+	p->port = strtol(argv[1], &e, 0);
+	if (e && *e) {
+		fprintf(stderr, "Bad port\n");
+		return -1;
+	}
+
+	p->svid = strtol(argv[2], &e, 0);
+	if ((e && *e) || !p->svid) {
+		fprintf(stderr, "Bad svid\n");
+		return -1;
+	}
+
+	p->opos = strtol(argv[3], &e, 0);
+	if ((e && *e) || !p->opos) {
+		fprintf(stderr, "Bad opos\n");
+		return -1;
+	}
+
+	p->cmd = strtol(argv[4], &e, 0);
+	if ((e && *e) || (p->cmd >= PD_MODE_CMD_COUNT)) {
+		fprintf(stderr, "Bad cmd\n");
+		return -1;
+	}
+	return ec_command(EC_CMD_USB_PD_SET_AMODE, 0, p, sizeof(*p), NULL, 0);
+}
+
+int cmd_pd_get_amode(int argc, char *argv[])
+{
+	int i;
+	char *e;
+	struct ec_params_usb_pd_get_mode_request *p =
+		(struct ec_params_usb_pd_get_mode_request *)ec_outbuf;
+	struct ec_params_usb_pd_get_mode_response *r =
+		(struct ec_params_usb_pd_get_mode_response *)ec_inbuf;
+
+	if (argc < 2) {
+		fprintf(stderr, "Usage: %s <port>\n", argv[0]);
+		return -1;
+	}
+
+	p->port = strtol(argv[1], &e, 0);
+	if (e && *e) {
+		fprintf(stderr, "Bad port\n");
+		return -1;
+	}
+
+	p->svid_idx = 0;
+	do {
+		ec_command(EC_CMD_USB_PD_GET_AMODE, 0, p, sizeof(*p),
+			   ec_inbuf, ec_max_insize);
+		if (!r->svid)
+			break;
+		printf("%cSVID:0x%04x ", (r->opos) ? '*' : ' ',
+		       r->svid);
+		for (i = 0; i < PDO_MODES; i++) {
+			printf("%c0x%08x ", (r->opos && (r->opos == i + 1)) ?
+			       '*' : ' ', r->vdo[i]);
+		}
+		printf("\n");
+		p->svid_idx++;
+	} while (p->svid_idx < SVID_DISCOVERY_MAX);
+	return -1;
+}
+
+#ifdef __x86_64
+#include <sys/io.h>
 
 int cmd_serial_test(int argc, char *argv[])
 {
@@ -1015,6 +1208,28 @@ int cmd_serial_test(int argc, char *argv[])
 	return 0;
 }
 
+
+int cmd_port_80_flood(int argc, char *argv[])
+{
+	int i;
+
+	for (i = 0; i < 256; i++)
+		outb(i, 0x80);
+	return 0;
+}
+#else
+int cmd_serial_test(int argc, char *argv[])
+{
+	printf("x86 specific command\n");
+	return -1;
+}
+
+int cmd_port_80_flood(int argc, char *argv[])
+{
+	printf("x86 specific command\n");
+	return -1;
+}
+#endif
 
 int read_mapped_temperature(int id)
 {
@@ -1711,6 +1926,9 @@ static const struct {
 	LB_SIZES(get_params_v1),
 	LB_SIZES(set_params_v1),
 	LB_SIZES(set_program),
+	LB_SIZES(manual_suspend_ctrl),
+	LB_SIZES(suspend),
+	LB_SIZES(resume),
 };
 #undef LB_SIZES
 
@@ -2841,16 +3059,22 @@ int cmd_usb_pd(int argc, char *argv[])
 	const char *role_str[] = {"", "toggle", "toggle-off", "sink", "source"};
 	const char *mux_str[] = {"", "none", "usb", "dp", "dock", "auto"};
 	struct ec_params_usb_pd_control p;
+	struct ec_response_usb_pd_control_v1 *r_v1 =
+		(struct ec_response_usb_pd_control_v1 *)ec_inbuf;
 	struct ec_response_usb_pd_control *r =
 		(struct ec_response_usb_pd_control *)ec_inbuf;
 	int rv, i, j;
 	int option_ok;
 	char *e;
+	int cmdver = 1;
 
 	BUILD_ASSERT(ARRAY_SIZE(role_str) == USB_PD_CTRL_ROLE_COUNT);
 	BUILD_ASSERT(ARRAY_SIZE(mux_str) == USB_PD_CTRL_MUX_COUNT);
 	p.role = USB_PD_CTRL_ROLE_NO_CHANGE;
 	p.mux = USB_PD_CTRL_MUX_NO_CHANGE;
+
+	if (!ec_cmd_version_supported(EC_CMD_USB_PD_CONTROL, cmdver))
+		cmdver = 0;
 
 	if (argc < 2) {
 		fprintf(stderr, "No port specified.\n");
@@ -2910,15 +3134,81 @@ int cmd_usb_pd(int argc, char *argv[])
 		}
 	}
 
-	rv = ec_command(EC_CMD_USB_PD_CONTROL, 0, &p, sizeof(p),
+	rv = ec_command(EC_CMD_USB_PD_CONTROL, cmdver, &p, sizeof(p),
 			ec_inbuf, ec_max_insize);
 
-	if ((rv >= 0) && (argc == 2))
+	if (rv < 0 || argc != 2)
+		return (rv < 0) ? rv : 0;
+
+	if (cmdver == 0) {
 		printf("Port C%d is %sabled, Role:%s Polarity:CC%d State:%d\n",
 		       p.port, (r->enabled) ? "en" : "dis",
 		       r->role == PD_ROLE_SOURCE ? "SRC" : "SNK",
 		       r->polarity + 1, r->state);
+	} else {
+		printf("Port C%d is %s, Role:%s %s Polarity:CC%d State:%s\n",
+		       p.port, (r_v1->enabled) ? "enabled" : "disabled",
+		       r_v1->role & PD_ROLE_SOURCE ? "SRC" : "SNK",
+		       r_v1->role & (PD_ROLE_DFP << 1) ? "DFP" : "UFP",
+		       r_v1->polarity + 1, r_v1->state);
+	}
 	return (rv < 0 ? rv : 0);
+}
+
+static void print_pd_power_info(struct ec_response_usb_pd_power_info *r)
+{
+	switch (r->role) {
+	case USB_PD_PORT_POWER_DISCONNECTED:
+		printf("Disconnected");
+		break;
+	case USB_PD_PORT_POWER_SOURCE:
+		printf("SRC");
+		break;
+	case USB_PD_PORT_POWER_SINK:
+		printf("SNK");
+		break;
+	case USB_PD_PORT_POWER_SINK_NOT_CHARGING:
+		printf("SNK (not charging)");
+		break;
+	default:
+		printf("Unknown");
+	}
+
+	if ((r->role == USB_PD_PORT_POWER_DISCONNECTED) ||
+	    (r->role == USB_PD_PORT_POWER_SOURCE)) {
+		printf("\n");
+		return;
+	}
+
+	printf(r->dualrole ? " DRP" : " Charger");
+	switch (r->type) {
+	case USB_CHG_TYPE_PD:
+		printf(" PD");
+		break;
+	case USB_CHG_TYPE_C:
+		printf(" Type-C");
+		break;
+	case USB_CHG_TYPE_PROPRIETARY:
+		printf(" Proprietary");
+		break;
+	case USB_CHG_TYPE_BC12_DCP:
+		printf(" DCP");
+		break;
+	case USB_CHG_TYPE_BC12_CDP:
+		printf(" CDP");
+		break;
+	case USB_CHG_TYPE_BC12_SDP:
+		printf(" SDP");
+		break;
+	case USB_CHG_TYPE_OTHER:
+		printf(" Other");
+		break;
+	}
+	printf(" %dmV max %dmV / %dmA",
+		r->meas.voltage_now, r->meas.voltage_max, r->meas.current_max);
+	if (r->max_power)
+		printf(" / %dmW", r->max_power / 1000);
+	printf("\n");
 }
 
 int cmd_usb_pd_power(int argc, char *argv[])
@@ -2942,66 +3232,8 @@ int cmd_usb_pd_power(int argc, char *argv[])
 		if (rv < 0)
 			return rv;
 
-		printf("Port %d:\n  Power role: ", i);
-		switch (r->role) {
-		case USB_PD_PORT_POWER_DISCONNECTED:
-			printf("Disconnected\n");
-			break;
-		case USB_PD_PORT_POWER_SOURCE:
-			printf("Source\n");
-			break;
-		case USB_PD_PORT_POWER_SINK:
-			printf("Sink\n");
-			break;
-		case USB_PD_PORT_POWER_SINK_NOT_CHARGING:
-			printf("Sink (not charging)\n");
-			break;
-		default:
-			printf("Unknown\n");
-		}
-
-		if (r->role != USB_PD_PORT_POWER_DISCONNECTED) {
-			printf("  %s\n", r->dualrole ?
-				"Dual-role device" : "Dedicated charger");
-		}
-
-		printf("  Charger type: ");
-		switch (r->type) {
-		case USB_CHG_TYPE_PD:
-			printf("PD\n");
-			break;
-		case USB_CHG_TYPE_C:
-			printf("Type-c\n");
-			break;
-		case USB_CHG_TYPE_PROPRIETARY:
-			printf("Proprietary\n");
-			break;
-		case USB_CHG_TYPE_BC12_DCP:
-			printf("BC1.2 DCP\n");
-			break;
-		case USB_CHG_TYPE_BC12_CDP:
-			printf("BC1.2 CDP\n");
-			break;
-		case USB_CHG_TYPE_BC12_SDP:
-			printf("BC1.2 SDP\n");
-			break;
-		case USB_CHG_TYPE_OTHER:
-			printf("Other\n");
-			break;
-		default:
-			printf("None\n");
-		}
-
-		printf("  Max charging voltage: %dmV\n",
-			r->voltage_max);
-		printf("  Current charging voltage: %dmV\n",
-			r->voltage_now);
-		printf("  Max input current: %dmA\n",
-			r->current_max);
-		printf("  Max input power: %dmW\n",
-			r->max_power);
-
-		printf("\n");
+		printf("Port %d: ", i);
+		print_pd_power_info(r);
 	}
 
 	return 0;
@@ -4636,17 +4868,6 @@ int cmd_console(int argc, char *argv[])
 	printf("\n");
 	return 0;
 }
-
-/* Flood port 80 with byte writes */
-int cmd_port_80_flood(int argc, char *argv[])
-{
-	int i;
-
-	for (i = 0; i < 256; i++)
-		outb(i, 0x80);
-	return 0;
-}
-
 struct param_info {
 	const char *name;	/* name of this parameter */
 	const char *help;	/* help message */
@@ -5199,6 +5420,125 @@ int cmd_charge_port_override(int argc, char *argv[])
 	return 0;
 }
 
+int cmd_pd_log(int argc, char *argv[])
+{
+	union {
+		struct ec_response_pd_log r;
+		uint32_t words[8]; /* space for the payload */
+	} u;
+	struct mcdp_info minfo;
+	struct ec_response_usb_pd_power_info pinfo;
+	int rv;
+	unsigned long long milliseconds;
+	unsigned seconds;
+	time_t now;
+	struct tm ltime;
+	char time_str[64];
+
+	while (1) {
+		now = time(NULL);
+		rv = ec_command(EC_CMD_PD_GET_LOG_ENTRY, 0,
+				NULL, 0, &u, sizeof(u));
+		if (rv < 0)
+			return rv;
+
+		if (u.r.type == PD_EVENT_NO_ENTRY) {
+			printf("--- END OF LOG ---\n");
+			break;
+		}
+
+		/* the timestamp is in 1024th of seconds */
+		milliseconds = ((uint64_t)u.r.timestamp <<
+					 PD_LOG_TIMESTAMP_SHIFT) / 1000;
+		/* the timestamp is the number of milliseconds in the past */
+		seconds = (milliseconds + 999) / 1000;
+		milliseconds -= seconds * 1000;
+		now -= seconds;
+		localtime_r(&now, &ltime);
+		strftime(time_str, sizeof(time_str), "%F %T", &ltime);
+		printf("%s.%03lld P%d ", time_str, -milliseconds,
+			PD_LOG_PORT(u.r.size_port));
+		if (u.r.type == PD_EVENT_MCU_CHARGE) {
+			if (u.r.data & CHARGE_FLAGS_OVERRIDE)
+				printf("override ");
+			if (u.r.data & CHARGE_FLAGS_DELAYED_OVERRIDE)
+				printf("pending_override ");
+			memcpy(&pinfo.meas, u.r.payload,
+				sizeof(struct usb_chg_measures));
+			pinfo.dualrole = !!(u.r.data & CHARGE_FLAGS_DUAL_ROLE);
+			pinfo.role = u.r.data & CHARGE_FLAGS_ROLE_MASK;
+			pinfo.type = (u.r.data & CHARGE_FLAGS_TYPE_MASK)
+					>> CHARGE_FLAGS_TYPE_SHIFT;
+			pinfo.max_power = 0;
+			print_pd_power_info(&pinfo);
+		} else if (u.r.type == PD_EVENT_MCU_CONNECT) {
+			printf("New connection\n");
+		} else if (u.r.type == PD_EVENT_MCU_BOARD_CUSTOM) {
+			printf("Board-custom event\n");
+		} else if (u.r.type == PD_EVENT_ACC_RW_FAIL) {
+			printf("RW signature check failed\n");
+		} else if (u.r.type == PD_EVENT_PS_FAULT) {
+			static const char * const fault_names[] = {
+				"---", "OCP", "fast OCP", "OVP", "Discharge"
+			};
+			const char *fault = u.r.data < ARRAY_SIZE(fault_names) ?
+					fault_names[u.r.data] : "???";
+			printf("Power supply fault: %s\n", fault);
+		} else if (u.r.type == PD_EVENT_VIDEO_DP_MODE) {
+			printf("DP mode %sabled\n", (u.r.data == 1) ?
+			       "en" : "dis");
+		} else if (u.r.type == PD_EVENT_VIDEO_CODEC) {
+			memcpy(&minfo, u.r.payload,
+			       sizeof(struct mcdp_info));
+			printf("HDMI info: family:%04x chipid:%04x "
+			       "irom:%d.%d.%d fw:%d.%d.%d\n",
+			       MCDP_FAMILY(minfo.family),
+			       MCDP_CHIPID(minfo.chipid),
+			       minfo.irom.major, minfo.irom.minor,
+			       minfo.irom.build, minfo.fw.major,
+			       minfo.fw.minor, minfo.fw.build);
+		} else { /* Unknown type */
+			int i;
+			printf("Event %02x (%04x) [", u.r.type, u.r.data);
+			for (i = 0; i < PD_LOG_SIZE(u.r.size_port); i++)
+				printf("%02x ", u.r.payload[i]);
+			printf("]\n");
+		}
+	}
+
+	return 0;
+}
+
+int cmd_pd_write_log(int argc, char *argv[])
+{
+	struct ec_params_pd_write_log_entry p;
+	char *e;
+
+	if (argc < 3) {
+		fprintf(stderr, "Usage: %s <log_type> <port>\n",
+			argv[0]);
+		return -1;
+	}
+
+	if (!strcasecmp(argv[1], "charge"))
+		p.type = PD_EVENT_MCU_CHARGE;
+	else {
+		p.type = strtol(argv[1], &e, 0);
+		if (e && *e) {
+			fprintf(stderr, "Bad log_type parameter.\n");
+			return -1;
+		}
+	}
+
+	p.port = strtol(argv[2], &e, 0);
+	if (e && *e) {
+		fprintf(stderr, "Bad port parameter.\n");
+		return -1;
+	}
+
+	return ec_command(EC_CMD_PD_WRITE_LOG_ENTRY, 0, &p, sizeof(p), NULL, 0);
+}
+
 /* NULL-terminated list of commands */
 const struct command commands[] = {
 	{"extpwrcurrentlimit", cmd_ext_power_current_limit},
@@ -5251,7 +5591,11 @@ const struct command commands[] = {
 	{"nextevent", cmd_next_event},
 	{"panicinfo", cmd_panic_info},
 	{"pause_in_s5", cmd_s5},
+	{"pdgetmode", cmd_pd_get_amode},
+	{"pdsetmode", cmd_pd_set_amode},
 	{"port80read", cmd_port80_read},
+	{"pdlog", cmd_pd_log},
+	{"pdwritelog", cmd_pd_write_log},
 	{"powerinfo", cmd_power_info},
 	{"protoinfo", cmd_proto_info},
 	{"pstoreinfo", cmd_pstore_info},

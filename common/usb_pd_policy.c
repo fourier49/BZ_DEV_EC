@@ -50,6 +50,9 @@ static int pd_find_pdo_index(int cnt, uint32_t *src_caps, int max_mv)
 {
 	int i, uw, max_uw = 0, mv, ma;
 	int ret = -1;
+#ifdef PD_PREFER_LOW_VOLTAGE
+	int cur_mv;
+#endif
 
 	/* max_mv of -1 represents max limit */
 	if (max_mv == -1)
@@ -61,16 +64,31 @@ static int pd_find_pdo_index(int cnt, uint32_t *src_caps, int max_mv)
 	/* Get max power that is under our max voltage input */
 	for (i = 0; i < cnt; i++) {
 		mv = ((src_caps[i] >> 10) & 0x3FF) * 50;
+		/* Skip any voltage not supported by this board */
+		if (!pd_is_valid_input_voltage(mv))
+			continue;
+
 		if ((src_caps[i] & PDO_TYPE_MASK) == PDO_TYPE_BATTERY) {
 			uw = 250000 * (src_caps[i] & 0x3FF);
 		} else {
 			ma = (src_caps[i] & 0x3FF) * 10;
 			uw = ma * mv;
 		}
+#ifdef PD_PREFER_LOW_VOLTAGE
+		if (mv > max_mv)
+			continue;
+		uw = MIN(uw, PD_MAX_POWER_MW * 1000);
+		if ((uw > max_uw) || ((uw == max_uw) && mv < cur_mv)) {
+			ret = i;
+			max_uw = uw;
+			cur_mv = mv;
+		}
+#else
 		if ((uw > max_uw) && (mv <= max_mv)) {
 			ret = i;
 			max_uw = uw;
 		}
+#endif
 	}
 	return ret;
 }
@@ -92,10 +110,10 @@ static void pd_extract_pdo_power(uint32_t pdo, uint32_t *ma, uint32_t *mv)
 		max_ma = 1000 * MIN(1000 * uw, PD_MAX_POWER_MW) / *mv;
 	} else {
 		max_ma = 10 * (pdo & 0x3FF);
-		max_ma = MIN(max_ma, PD_MAX_CURRENT_MA);
+		max_ma = MIN(max_ma, PD_MAX_POWER_MW * 1000 / *mv);
 	}
 
-	*ma = max_ma;
+	*ma = MIN(max_ma, PD_MAX_CURRENT_MA);
 }
 
 int pd_build_request(int cnt, uint32_t *src_caps, uint32_t *rdo,
@@ -117,24 +135,16 @@ int pd_build_request(int cnt, uint32_t *src_caps, uint32_t *rdo,
 
 	pd_extract_pdo_power(src_caps[pdo_index], ma, mv);
 	uw = *ma * *mv;
+	/* Mismatch bit set if less power offered than the operating power */
 	if (uw < (1000 * PD_OPERATING_POWER_MW))
 		flags |= RDO_CAP_MISMATCH;
 
 	if ((src_caps[pdo_index] & PDO_TYPE_MASK) == PDO_TYPE_BATTERY) {
 		int mw = uw / 1000;
 		*rdo = RDO_BATT(pdo_index + 1, mw, mw, flags);
-		CPRINTF("Request [%d] %dmV %dmW",
-			pdo_index, *mv, mw);
 	} else {
 		*rdo = RDO_FIXED(pdo_index + 1, *ma, *ma, flags);
-		CPRINTF("Request [%d] %dmV %dmA",
-			pdo_index, *mv, *ma);
 	}
-	/* Mismatch bit set if less power offered than the operating power */
-	if (flags & RDO_CAP_MISMATCH)
-		CPRINTF(" Mismatch");
-	CPRINTF("\n");
-
 	return EC_SUCCESS;
 }
 
@@ -173,19 +183,18 @@ unsigned pd_get_max_voltage(void)
 
 static struct pd_policy pe[PD_PORT_COUNT];
 
-#define AMODE_VALID(port) (pe[port].amode.index != -1)
-
-static void pe_init(int port)
+void pd_dfp_pe_init(int port)
 {
 	memset(&pe[port], 0, sizeof(struct pd_policy));
-	pe[port].amode.index = -1;
 }
 
-static void dfp_consume_identity(int port, uint32_t *payload)
+static void dfp_consume_identity(int port, int cnt, uint32_t *payload)
 {
 	int ptype = PD_IDH_PTYPE(payload[VDO_I(IDH)]);
-	pe_init(port);
-	memcpy(&pe[port].identity, payload + 1, sizeof(pe[port].identity));
+	size_t identity_size = MIN(sizeof(pe[port].identity),
+				   (cnt - 1) * sizeof(uint32_t));
+	pd_dfp_pe_init(port);
+	memcpy(&pe[port].identity, payload + 1, identity_size);
 	switch (ptype) {
 	case IDH_PTYPE_AMA:
 		/* TODO(tbroch) do I disable VBUS here if power contract
@@ -214,7 +223,7 @@ static void dfp_consume_svids(int port, uint32_t *payload)
 
 	for (i = pe[port].svid_cnt; i < pe[port].svid_cnt + 12; i += 2) {
 		if (i == SVID_DISCOVERY_MAX) {
-			CPRINTF("ERR: too many svids discovered\n");
+			CPRINTF("ERR:SVIDCNT\n");
 			break;
 		}
 
@@ -233,107 +242,201 @@ static void dfp_consume_svids(int port, uint32_t *payload)
 	}
 	/* TODO(tbroch) need to re-issue discover svids if > 12 */
 	if (i && ((i % 12) == 0))
-		CPRINTF("TODO: need to re-issue discover svids > 12\n");
+		CPRINTF("ERR:SVID+12\n");
 }
 
 static int dfp_discover_modes(int port, uint32_t *payload)
 {
 	uint16_t svid = pe[port].svids[pe[port].svid_idx].svid;
-	if (!pe[port].svid_cnt)
+	if (pe[port].svid_idx >= pe[port].svid_cnt)
 		return 0;
 	payload[0] = VDO(svid, 1, CMD_DISCOVER_MODES);
 	return 1;
 }
 
-static int dfp_consume_modes(int port, int cnt, uint32_t *payload)
+static void dfp_consume_modes(int port, int cnt, uint32_t *payload)
 {
 	int idx = pe[port].svid_idx;
 	pe[port].svids[idx].mode_cnt = cnt - 1;
 	if (pe[port].svids[idx].mode_cnt < 0) {
-		CPRINTF("PE ERR: no modes provided for SVID\n");
+		CPRINTF("ERR:NOMODE\n");
 	} else {
 		memcpy(pe[port].svids[pe[port].svid_idx].mode_vdo, &payload[1],
 		       sizeof(uint32_t) * pe[port].svids[idx].mode_cnt);
 	}
 
 	pe[port].svid_idx++;
-	return (pe[port].svid_idx < pe[port].svid_cnt);
 }
 
-int pd_alt_mode(int port)
+static int get_mode_idx(int port, uint16_t svid)
 {
-	if (!AMODE_VALID(port))
-		/* zero is reserved */
-		return 0;
+	int i;
 
-	return pe[port].amode.index + 1;
+	for (i = 0; i < PD_AMODE_COUNT; i++) {
+		if (pe[port].amodes[i].fx->svid == svid)
+			return i;
+	}
+	return -1;
 }
 
-/* TODO(tbroch) this function likely needs to move up the stack to where system
- * policy decisions are made. */
-static int dfp_enter_mode(int port, uint32_t *payload)
+static struct svdm_amode_data *get_modep(int port, uint16_t svid)
 {
-	int i, j, done;
-	struct svdm_amode_data *modep = &pe[port].amode;
-	for (i = 0, done = 0; !done && (i < supported_modes_cnt); i++) {
+	int idx = get_mode_idx(port, svid);
+
+	return (idx == -1) ? NULL : &pe[port].amodes[idx];
+}
+
+int pd_alt_mode(int port, uint16_t svid)
+{
+	struct svdm_amode_data *modep = get_modep(port, svid);
+
+	return (modep) ? modep->opos : -1;
+}
+
+int allocate_mode(int port, uint16_t svid)
+{
+	int i, j;
+	struct svdm_amode_data *modep;
+	int mode_idx = get_mode_idx(port, svid);
+
+	if (mode_idx != -1)
+		return mode_idx;
+
+	/* There's no space to enter another mode */
+	if (pe[port].amode_idx == PD_AMODE_COUNT) {
+		CPRINTF("ERR:NO AMODE SPACE\n");
+		return -1;
+	}
+
+	/* Allocate ...  if SVID == 0 enter default supported policy */
+	for (i = 0; i < supported_modes_cnt; i++) {
+		if (!&supported_modes[i])
+			continue;
+
 		for (j = 0; j < pe[port].svid_cnt; j++) {
-			if (pe[port].svids[j].svid != supported_modes[i].svid)
+			struct svdm_svid_data *svidp = &pe[port].svids[j];
+			if ((svidp->svid != supported_modes[i].svid) ||
+			    (svid && (svidp->svid != svid)))
 				continue;
-			pe[port].amode.fx = &supported_modes[i];
-			pe[port].amode.mode_caps =
-				pe[port].svids[j].mode_vdo[0];
-			pe[port].amode.index = 0;
-			done = 1;
-			break;
+
+			modep = &pe[port].amodes[pe[port].amode_idx];
+			modep->fx = &supported_modes[i];
+			modep->data = &pe[port].svids[j];
+			pe[port].amode_idx++;
+			return pe[port].amode_idx - 1;
 		}
 	}
-	if (!AMODE_VALID(port))
+	return -1;
+}
+
+/*
+ * Enter default mode ( payload[0] == 0 ) or attempt to enter mode via svid &
+ * opos
+*/
+uint32_t pd_dfp_enter_mode(int port, uint16_t svid, int opos)
+{
+	int mode_idx = allocate_mode(port, svid);
+	struct svdm_amode_data *modep;
+	uint32_t mode_caps;
+
+	if (mode_idx == -1)
+		return 0;
+	modep = &pe[port].amodes[mode_idx];
+
+	if (!opos) {
+		/* choose the lowest as default */
+		modep->opos = 1;
+	} else if (opos <= modep->data->mode_cnt) {
+		modep->opos = opos;
+	} else {
+		CPRINTF("opos error\n");
+		return 0;
+	}
+
+	mode_caps = modep->data->mode_vdo[modep->opos - 1];
+	if (modep->fx->enter(port, mode_caps) == -1)
 		return 0;
 
-	if (modep->fx->enter(port, modep->mode_caps) == -1)
+	/* SVDM to send to UFP for mode entry */
+	return VDO(modep->fx->svid, 1, CMD_ENTER_MODE | VDO_OPOS(modep->opos));
+}
+
+static int validate_mode_request(struct svdm_amode_data *modep,
+				 uint16_t svid, int opos)
+{
+	if (!modep->fx)
 		return 0;
 
-	payload[0] = VDO(modep->fx->svid, 1,
-			 CMD_ENTER_MODE | VDO_OPOS(pd_alt_mode(port)));
+	if (svid != modep->fx->svid) {
+		CPRINTF("ERR:svid r:0x%04x != c:0x%04x\n",
+			svid, modep->fx->svid);
+		return 0;
+	}
+
+	if (opos != modep->opos) {
+		CPRINTF("ERR:opos r:%d != c:%d\n",
+			opos, modep->opos);
+		return 0;
+	}
+
 	return 1;
 }
 
 static void dfp_consume_attention(int port, uint32_t *payload)
 {
-	int svid = PD_VDO_VID(payload[0]);
+	uint16_t svid = PD_VDO_VID(payload[0]);
 	int opos = PD_VDO_OPOS(payload[0]);
+	struct svdm_amode_data *modep = get_modep(port, svid);
 
-	if (!AMODE_VALID(port))
+	if (!validate_mode_request(modep, svid, opos))
 		return;
-	if (svid != pe[port].amode.fx->svid) {
-		CPRINTF("PE ERR: svid s:0x%04x != m:0x%04x\n",
-			svid, pe[port].amode.fx->svid);
-		return;
-	}
-	if (opos != pd_alt_mode(port)) {
-		CPRINTF("PE ERR: opos s:%d != m:%d\n",
-			opos, pd_alt_mode(port));
-		return;
-	}
-	if (pe[port].amode.fx->attention)
-		pe[port].amode.fx->attention(port, payload);
+
+	if (modep->fx->attention)
+		modep->fx->attention(port, payload);
 }
 
-int pd_exit_mode(int port, uint32_t *payload)
+int pd_dfp_exit_mode(int port, uint16_t svid, int opos)
 {
-	struct svdm_amode_data *modep = &pe[port].amode;
-	if (!modep->fx)
+	struct svdm_amode_data *modep;
+	int idx;
+
+	/*
+	 * Empty svid signals we should reset DFP VDM state by exiting all
+	 * entered modes then clearing state.  This occurs when we've
+	 * disconnected or for hard reset.
+	 */
+	if (!svid) {
+		for (idx = 0; idx < PD_AMODE_COUNT; idx++)
+			if (pe[port].amodes[idx].fx)
+				pe[port].amodes[idx].fx->exit(port);
+
+		pd_dfp_pe_init(port);
+		return 0;
+	}
+
+	/*
+	 * TODO(crosbug.com/p/33946) : below needs revisited to allow multiple
+	 * mode exit.  Additionally it should honor OPOS == 7 as DFP's request
+	 * to exit all modes.  We currently don't have any UFPs that support
+	 * multiple modes on one SVID.
+	 */
+	modep = get_modep(port, svid);
+	if (!validate_mode_request(modep, svid, opos))
 		return 0;
 
+	/* call DFPs exit function */
 	modep->fx->exit(port);
-
-	if (payload)
-		payload[0] = VDO(modep->fx->svid, 1,
-				 CMD_EXIT_MODE | VDO_OPOS(pd_alt_mode(port)));
-	modep->index = -1;
+	/* exit the mode */
+	modep->opos = 0;
 	return 1;
 }
 
+uint16_t pd_get_identity_vid(int port)
+{
+	return PD_IDH_VID(pe[port].identity[0]);
+}
+
+#ifdef CONFIG_CMD_USB_PD_PE
 static void dump_pe(int port)
 {
 	const char * const idh_ptype_names[]  = {
@@ -341,6 +444,8 @@ static void dump_pe(int port)
 		"RSV6", "RSV7"};
 
 	int i, j, idh_ptype;
+	struct svdm_amode_data *modep;
+	uint32_t mode_caps;
 
 	if (pe[port].identity[0] == 0) {
 		ccprintf("No identity discovered yet.\n");
@@ -349,7 +454,7 @@ static void dump_pe(int port)
 	idh_ptype = PD_IDH_PTYPE(pe[port].identity[0]);
 	ccprintf("IDENT:\n");
 	ccprintf("\t[ID Header] %08x :: %s, VID:%04x\n", pe[port].identity[0],
-		 idh_ptype_names[idh_ptype], PD_IDH_VID(pe[port].identity[0]));
+		 idh_ptype_names[idh_ptype], pd_get_identity_vid(port));
 	ccprintf("\t[Cert Stat] %08x\n", pe[port].identity[1]);
 	for (i = 2; i < ARRAY_SIZE(pe[port].identity); i++) {
 		ccprintf("\t");
@@ -369,14 +474,13 @@ static void dump_pe(int port)
 			ccprintf(" [%d] %08x", j + 1,
 				 pe[port].svids[i].mode_vdo[j]);
 		ccprintf("\n");
+		modep = get_modep(port, pe[port].svids[i].svid);
+		if (modep) {
+			mode_caps = modep->data->mode_vdo[modep->opos - 1];
+			ccprintf("MODE[%d]: svid:%04x caps:%08x\n", modep->opos,
+				 modep->fx->svid, mode_caps);
+		}
 	}
-	if (!AMODE_VALID(port)) {
-		ccprintf("No mode chosen yet.\n");
-		return;
-	}
-
-	ccprintf("MODE[%d]: svid:%04x caps:%08x\n", pd_alt_mode(port),
-		 pe[port].amode.fx->svid, pe[port].amode.mode_caps);
 }
 
 static int command_pe(int argc, char **argv)
@@ -399,21 +503,17 @@ DECLARE_CONSOLE_COMMAND(pe, command_pe,
 			"<port> dump",
 			"USB PE",
 			NULL);
+#endif /* CONFIG_CMD_USB_PD_PE */
 
 #endif /* CONFIG_USB_PD_ALT_MODE_DFP */
 
 int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 {
-	int i;
 	int cmd = PD_VDO_CMD(payload[0]);
 	int cmd_type = PD_VDO_CMDT(payload[0]);
 	int (*func)(int port, uint32_t *payload) = NULL;
 
 	int rsize = 1; /* VDM header at a minimum */
-	CPRINTF("SVDM/%d [%d] %08x", cnt, cmd, payload[0]);
-	for (i = 1; i < cnt; i++)
-		CPRINTF(" %08x", payload[i]);
-	CPRINTF("\n");
 
 	payload[0] &= ~VDO_CMDT_MASK;
 	*rpayload = payload;
@@ -451,7 +551,7 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 			return 0;
 #endif
 		default:
-			CPRINTF("PE ERR: unknown command %d\n", cmd);
+			CPRINTF("ERR:CMD:%d\n", cmd);
 			rsize = 0;
 		}
 		if (func)
@@ -468,10 +568,15 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 			rsize = 1;
 		}
 	} else if (cmd_type == CMDT_RSP_ACK) {
+#ifdef CONFIG_USB_PD_ALT_MODE_DFP
+		struct svdm_amode_data *modep;
+
+		modep = get_modep(port, PD_VDO_VID(payload[0]));
+#endif
 		switch (cmd) {
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 		case CMD_DISCOVER_IDENT:
-			dfp_consume_identity(port, payload);
+			dfp_consume_identity(port, cnt, payload);
 			rsize = dfp_discover_svids(port, payload);
 			break;
 		case CMD_DISCOVER_SVID:
@@ -479,32 +584,35 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 			rsize = dfp_discover_modes(port, payload);
 			break;
 		case CMD_DISCOVER_MODES:
-			if (dfp_consume_modes(port, cnt, payload))
-				rsize = dfp_discover_modes(port, payload);
-			else
-				rsize = dfp_enter_mode(port, payload);
+			dfp_consume_modes(port, cnt, payload);
+			rsize = dfp_discover_modes(port, payload);
+			/* enter the default mode for DFP */
+			if (!rsize) {
+				payload[0] = pd_dfp_enter_mode(port, 0, 0);
+				if (payload[0])
+					rsize = 1;
+			}
 			break;
 		case CMD_ENTER_MODE:
-			if (AMODE_VALID(port)) {
-				rsize = pe[port].amode.fx->status(port,
-								  payload);
-				payload[0] |=
-					VDO_OPOS(pd_alt_mode(port));
-			} else {
-				rsize = 0;
+			if (!modep->opos)
+				pd_dfp_enter_mode(port, 0, 0);
+			if (modep->opos) {
+				rsize = modep->fx->status(port, payload);
+				payload[0] |= PD_VDO_OPOS(modep->opos);
 			}
 			break;
 		case CMD_DP_STATUS:
 			/* DP status response & UFP's DP attention have same
 			   payload */
 			dfp_consume_attention(port, payload);
-			if (AMODE_VALID(port))
-				rsize = pe[port].amode.fx->config(port,
-								  payload);
+			if (modep->opos)
+				rsize = modep->fx->config(port, payload);
 			else
 				rsize = 0;
 			break;
 		case CMD_DP_CONFIG:
+			if (modep->opos && modep->fx->post_config)
+				modep->fx->post_config(port);
 			/* no response after DFPs ack */
 			rsize = 0;
 			break;
@@ -518,7 +626,7 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 			rsize = 0;
 			break;
 		default:
-			CPRINTF("PE ERR: unknown command %d\n", cmd);
+			CPRINTF("ERR:CMD:%d\n", cmd);
 			rsize = 0;
 		}
 
@@ -530,12 +638,11 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 		case CMD_DISCOVER_SVID:
 		case CMD_DISCOVER_MODES:
 			/* resend if its discovery */
-			payload[0] |= VDO_CMDT(CMDT_INIT);
 			rsize = 1;
 			break;
 		case CMD_ENTER_MODE:
 			/* Error */
-			CPRINTF("PE ERR: received BUSY for Enter mode\n");
+			CPRINTF("ERR:ENTBUSY\n");
 			rsize = 0;
 			break;
 		case CMD_EXIT_MODE:
@@ -549,9 +656,8 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 		rsize = 0;
 #endif /* CONFIG_USB_PD_ALT_MODE_DFP */
 	} else {
-		CPRINTF("PE ERR: unknown cmd type %d\n", cmd);
+		CPRINTF("ERR:CMDT:%d\n", cmd);
 	}
-	CPRINTS("DONE");
 	return rsize;
 }
 
@@ -576,23 +682,17 @@ void pd_usb_billboard_deferred(void)
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP) \
 	&& !defined(CONFIG_USB_PD_SIMPLE_DFP)
 
-	/* port always zero for these UFPs */
-	if (!pd_alt_mode(0))
+	/*
+	 * TODO(tbroch)
+	 * 1. Will we have multiple type-C port UFPs
+	 * 2. Will there be other modes applicable to DFPs besides DP
+	 */
+	if (!pd_alt_mode(0, USB_SID_DISPLAYPORT))
 		usb_connect();
 
 #endif
 }
 DECLARE_DEFERRED(pd_usb_billboard_deferred);
-
-#ifndef CONFIG_USB_PD_ALT_MODE_DFP
-int pd_exit_mode(int port, uint32_t *payload)
-{
-#ifdef CONFIG_USB_PD_ALT_MODE
-	svdm_rsp.exit_mode(port, payload);
-#endif
-	return 0;
-}
-#endif /* !CONFIG_USB_PD_ALT_MODE_DFP */
 
 #ifdef CONFIG_USB_PD_ALT_MODE_DFP
 static int hc_remote_pd_discovery(struct host_cmd_handler_args *args)
@@ -603,7 +703,7 @@ static int hc_remote_pd_discovery(struct host_cmd_handler_args *args)
 	if (*port >= PD_PORT_COUNT)
 		return EC_RES_INVALID_PARAM;
 
-	r->vid = PD_IDH_VID(pe[*port].identity[0]);
+	r->vid = pd_get_identity_vid(*port);
 	r->ptype = PD_IDH_PTYPE(pe[*port].identity[0]);
 	/* pid only included if vid is assigned */
 	if (r->vid)
@@ -615,6 +715,38 @@ static int hc_remote_pd_discovery(struct host_cmd_handler_args *args)
 DECLARE_HOST_COMMAND(EC_CMD_USB_PD_DISCOVERY,
 		     hc_remote_pd_discovery,
 		     EC_VER_MASK(0));
+
+static int hc_remote_pd_get_amode(struct host_cmd_handler_args *args)
+{
+	struct svdm_amode_data *modep;
+	const struct ec_params_usb_pd_get_mode_request *p = args->params;
+	struct ec_params_usb_pd_get_mode_response *r = args->response;
+
+	if (p->port >= PD_PORT_COUNT)
+		return EC_RES_INVALID_PARAM;
+
+	/* no more to send */
+	if (p->svid_idx >= pe[p->port].svid_cnt) {
+		r->svid = 0;
+		args->response_size = sizeof(r->svid);
+		return EC_RES_SUCCESS;
+	}
+
+	r->svid = pe[p->port].svids[p->svid_idx].svid;
+	r->opos = 0;
+	memcpy(r->vdo, pe[p->port].svids[p->svid_idx].mode_vdo, 24);
+	modep = get_modep(p->port, r->svid);
+
+	if (modep)
+		r->opos = pd_alt_mode(p->port, r->svid);
+
+	args->response_size = sizeof(*r);
+	return EC_RES_SUCCESS;
+}
+DECLARE_HOST_COMMAND(EC_CMD_USB_PD_GET_AMODE,
+		     hc_remote_pd_get_amode,
+		     EC_VER_MASK(0));
+
 #endif
 
 #define FW_RW_END (CONFIG_FW_RW_OFF + CONFIG_FW_RW_SIZE)
@@ -678,6 +810,7 @@ int pd_custom_flash_vdm(int port, int cnt, uint32_t *payload)
 		/* do not kill the code under our feet */
 		if (system_get_image_copy() != SYSTEM_IMAGE_RO)
 			break;
+		pd_log_event(PD_EVENT_ACC_RW_ERASE, 0, 0, NULL);
 		flash_offset = CONFIG_FW_RW_OFF;
 		flash_physical_erase(CONFIG_FW_RW_OFF, CONFIG_FW_RW_SIZE);
 		rw_flash_changed = 1;

@@ -120,7 +120,8 @@ static inline void pd_set_host_mode(int port, int enable) {}
 
 static inline int pd_adc_read(int port, int cc)
 {
-	return adc_read_channel(ADC_CH_CC1_PD);
+	/* only one CC line, assume other one is always low */
+	return (cc == 0) ? adc_read_channel(ADC_CH_CC1_PD) : 0;
 }
 
 static inline int pd_snk_is_vbus_provided(int port)
@@ -138,7 +139,8 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
 
 /* we are never a source : don't care about power supply */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 0 /* us */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  0 /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 0 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 1000

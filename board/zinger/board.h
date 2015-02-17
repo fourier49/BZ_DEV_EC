@@ -51,8 +51,11 @@
 #define CONFIG_USB_PD_CUSTOM_VDM
 #undef CONFIG_USB_PD_DUAL_ROLE
 #undef CONFIG_USB_PD_INTERNAL_COMP
+#define CONFIG_USB_PD_LOGGING
+#define CONFIG_USB_PD_LOG_SIZE 256
 #undef CONFIG_USB_PD_RX_COMP_IRQ
 #define CONFIG_USB_PD_SIMPLE_DFP
+#define CONFIG_USBC_BACKWARDS_COMPATIBLE_DFP
 #undef CONFIG_WATCHDOG_HELP
 #undef CONFIG_WATCHDOG_PERIOD_MS
 #define CONFIG_WATCHDOG_PERIOD_MS 2300
@@ -97,6 +100,8 @@ extern volatile uint32_t last_event;
 /* RW section flashing */
 int flash_erase_rw(void);
 int flash_write_rw(int offset, int size, const char *data);
+void flash_physical_permanent_protect(void);
+int flash_physical_is_permanently_protected(void);
 uint8_t *flash_hash_rw(void);
 int is_ro_mode(void);
 
