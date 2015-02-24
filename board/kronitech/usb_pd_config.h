@@ -245,6 +245,24 @@ static inline void pd_set_host_mode(int port, int enable)
 	}
 }
 
+/**
+ * Initialize various GPIOs and interfaces to safe state at start of pd_task.
+ *
+ * These include:
+ *   VCONNs disabled.
+ *
+ * @param port USB-C port number
+ */
+static inline void pd_config_init(int port)
+{
+#ifdef CONFIG_BIZ_EMU_HOST
+	if (port == 1) {
+		gpio_set_level(GPIO_USB_P1_CC1_VCONN_EN, 0);
+		gpio_set_level(GPIO_USB_P1_CC2_VCONN_EN, 0);
+	}
+#endif
+}
+
 static inline int pd_adc_read(int port, int cc)
 {
 	if (port == 0)
@@ -322,8 +340,12 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_SNK_VA            250 /* mV */
 #endif
 
-/* delay for the voltage transition on the power supply, chip max is 16us */
-#define PD_POWER_SUPPLY_TRANSITION_DELAY 20000 /* us */
+/*
+ * delay to turn on the power supply max is ~16ms.
+ * delay to turn off the power supply max is about ~180ms.
+ */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  30000  /* us */
+#define PD_POWER_SUPPLY_TURN_OFF_DELAY 250000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 15000

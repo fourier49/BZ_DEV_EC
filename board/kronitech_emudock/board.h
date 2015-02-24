@@ -1,1 +1,0 @@
-../kronitech/board.h

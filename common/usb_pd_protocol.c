@@ -3327,7 +3327,7 @@ static int command_amode(int argc, char **argv)
 				1,             /* DPv1.3 signaling */
 				2);            /* UFP connected */
 		pd_send_vdm(port, USB_SID_DISPLAYPORT,
-			CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port)), data, 1);
+			CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port, USB_SID_DISPLAYPORT)), data, 1);
 		board_set_usb_mux(port, (cmd==3)? TYPEC_MUX_DP : TYPEC_MUX_DOCK,
 			pd_get_polarity(port));
 		break;

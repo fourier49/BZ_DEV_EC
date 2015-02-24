@@ -1,1 +1,0 @@
-../kronitech/build.mk

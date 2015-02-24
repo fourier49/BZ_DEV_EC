@@ -1,1 +1,0 @@
-../kronitech/usb_pd_config.h

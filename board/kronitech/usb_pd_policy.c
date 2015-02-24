@@ -26,6 +26,13 @@
 #define MAX_POWER_MW       60000
 #define MAX_CURRENT_MA     3000
 
+/*
+ * Do not request any voltage within this deadband region, where
+ * we're not sure whether or not the boost or the bypass will be on.
+ */
+#define INPUT_VOLTAGE_DEADBAND_MIN 9700
+#define INPUT_VOLTAGE_DEADBAND_MAX 11999
+
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
 
 const uint32_t pd_src_pdo[] = {
@@ -127,6 +134,13 @@ int pd_choose_voltage(int cnt, uint32_t *src_caps, uint32_t *rdo,
 {
 	return pd_choose_voltage_common(cnt, src_caps, rdo, curr_limit,
 					supply_voltage, 0);
+}
+
+int pd_is_valid_input_voltage(int mv)
+{
+        /* Allow any voltage not in the boost bypass deadband */
+        return  (mv < INPUT_VOLTAGE_DEADBAND_MIN) ||
+                (mv > INPUT_VOLTAGE_DEADBAND_MAX);
 }
 
 int pd_check_requested_voltage(uint32_t rdo)
@@ -234,6 +248,20 @@ void pd_new_contract(int port, int pr_role, int dr_role,
 #endif
 }
 
+void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+{
+        /* If sink, and dual role toggling is on, then switch to source */
+        if (partner_pr_swap && pr_role == PD_ROLE_SINK &&
+            pd_get_dual_role() == PD_DRP_TOGGLE_ON)
+                pd_request_power_swap(port);
+}
+
+void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
+{
+        /* If UFP, try to switch to DFP */
+        if (partner_dr_swap && dr_role == PD_ROLE_UFP)
+                pd_request_data_swap(port);
+}
 
 /* ----------------- Vendor Defined Messages ------------------ */
 
@@ -271,7 +299,7 @@ static int dp_on;
 static int svdm_dp_status(int port, uint32_t *payload)
 {
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_STATUS | VDO_OPOS(pd_alt_mode(port)));
+			 CMD_DP_STATUS | VDO_OPOS(pd_alt_mode(port, USB_SID_DISPLAYPORT)));
 	payload[1] = VDO_DP_STATUS(0, /* HPD IRQ  ... not applicable */
 				   0, /* HPD level ... not applicable */
 				   0, /* exit DP? ... no */
@@ -288,7 +316,7 @@ static int svdm_dp_config(int port, uint32_t *payload)
 	board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
 	dp_on = 1;
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port)));
+			 CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port, USB_SID_DISPLAYPORT)));
 	payload[1] = VDO_DP_CFG(MODE_DP_PIN_C, /* sink pins */
 				MODE_DP_PIN_C, /* src pins */
 				1,             /* DPv1.3 signaling */
@@ -540,7 +568,7 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 	return 1;
 }
 
-int pd_alt_mode(int port)
+int pd_alt_mode(int port, uint16_t svid)
 {
 	return alt_mode;
 }
@@ -571,7 +599,7 @@ const struct svdm_response svdm_rsp = {
 
 
 //==============================================================================
-static int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 			 uint32_t **rpayload)
 {
 	int cmd = PD_VDO_CMD(payload[0]);
