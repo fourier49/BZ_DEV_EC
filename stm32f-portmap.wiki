@@ -1,0 +1,345 @@
+h1. General GPIOs
+
+Gives here general GPIN considerations, not specifically for Type-C.
+
+
+h2. General reserved GPIOs
+
+|_.Name |_.Port |_.Type |_.Description|
+| UART_TX | PA9 | | We may use U2 to replace UART in the future. Console command |
+| UART_RX | PA10 | | |
+| USB_DM | PA11 | GPIO_ANALOG | USB legacy by spec. Billboard Service. Live FW upgrade. Host command |
+| USB_DP | PA12 | GPIO_ANALOG | |
+| SWDIO | PA13 | | For ICE (Keil) debugging. Burn initial FW |
+| SWSLK | PA14 | | |
+
+
+h2. Power consideration
+
+h3. PD spec: Green power requirements
+
+We can design a PWR_STDBY or PWR_SUSP GPIO pin to shut off the power of non-CC controller components to save power.
+
+See spec p.266:
+!picture987-1.png!
+
+_7.2.3 Sink Standby_
+_The Sink shall transition to Sink Standby before a positive or negative voltage transition of V BUS . The Sink shall reduce its power draw during Sink Standby to pSnkStdby to allow for the Source to manage the voltage transition as well as supply sufficient operating current to the Sink to maintain PD operation during the transition. The Sink shall complete this transition to Sink Standby within tSnkStdby after evaluating the Accept Message from the Source. The transition when returning to Sink operation from Sink Standby shall be completed within tSnkNewPower. The pSnkStdby requirement shall only apply if the Sink power draw is higher than this level._
+
+_7.2.4 Suspend Power Consumption_
+_When Source has set its USB Suspend Supported flag (see Section 6.4.1.2.3.2), a Sink shall go to the lowest power state during USB suspend. The lowest power state shall be pSnkSusp or lower for a PDUSB Peripheral and pHubSusp or lower for a PDUSB Hub. There is no requirement for the Source voltage to be changed during USB suspend._
+
+
+h3. PD spec: power management requirements
+
+PD spec GiveBack / Power Reserve / GotoMin features.
+
+We may need to implement a power meter for USB-HUB's downstream ports: flash based USB storage will consume much less power than HDD based storage. This meter can connecto to STM32F072's ADC port to measure the voltage.
+
+
+h3. BizLink Power management GPIO pins
+
+|_.Name |_.Port |_.Type |_.Description|
+| MCU_PWR_DC_IN_DET | _any_ | GPIO_INPUT | detection of local DC-IN power (may be replaced with type-C receptacle instead), 0: detected, 1: disconnect |
+| MCU_PWR_SUSPEND_EN | _any_ | GPIO_OUT_HIGH | shutdown unnessary power in chips, suspend mode, 0: disable, 1: enable.
+	if need separate enabling pins, then use short abbrev for EN, as below:
+	* MCU_PWR_SUSPEND_LAN: USB to ethernet converter
+	* MCU_PWR_SUSPEND_HUB: USB HUB, or MCU_PWR_STDBY_HUB2 / MCU_PWR_STDBY_HUB3
+	* MCU_PWR_SUSPEND_DP: Displayport video converter |
+| MCU_PWR_STDBY_EN | _any_ | GPIO_OUT_HIGH | shutdown unnessary power in chips, standby mode, 0: disable, 1: enable.
+	if need separate enabling pins, then use short abbrev for EN, as below:
+	* MCU_PWR_STDBY_LAN: USB to ethernet converter
+	* MCU_PWR_STDBY_HUB: USB HUB, or MCU_PWR_STDBY_HUB2 / MCU_PWR_STDBY_HUB3
+	* MCU_PWR_STDBY_DP: Displayport video converter |
+| MCU_PWR_METER1 | _TBD_ | GPIO_ANALOG | power meter 1, ?? to measure the power consumption of some devices (like HDD) ?? |
+| MCU_PWR_METER2 | _TBD_ | GPIO_ANALOG | power meter 2 |
+
+
+h2. BizLink's proprietary FW updater
+
+Not only the type-C CC Controller FW will require to be updated, also the other chips.
+
+Consider the case when a Video or USB Converter chips (DP2HDMI, DP2VGA, USB2ETH, USB-HUB, ...) provides a SPI slave interface for online live FW upgrade. But STM32F will need to reserve the 2nd SPI interface for 2nd CC controller. What's our solution?
+
+BizLink's proprietary FW updater will handle this case:
+> BizLink FW upgrade USB protocol over D+/D- pins of Type-C host port (P0)
+> This proprietary protocol can do:
+> > Specify FW object: CC controller FW, USB-HUB FW, ...
+> > When entered FW Upgrade Alt Mode
+> > > The 2nd SPI interface will re-configured to SPI master
+> > > Enable the MOSFET to switch the SPI data/clock path from the 2nd CC port, to the corresponding SPI flash (in or out of the converter chip)
+> > > Write new FW image into the flash
+> > > Exit FW Upgrade Alt Mode back to normal type-C mode
+> BizLink FW updater suite consists of:
+> > Host side FW Upgrade APP: Windows, ...
+> > Device side tiny binary:
+> > > simple bootloader
+> > > BizLink FW upgrade USB protocol handler
+> > > SPI flash programming FW
+> > > USB device driver
+
+
+- - -
+
+h1. GPIOs for Type-C from Google
+
+The essential GPIO pins used for Type-C related signals.
+
+
+h2. Single CC port, plug (HOHO)
+
+* CC signals
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C_CC1_PD | PA1 | GPIO_ANALOG | CC RX |
+| PD_CC1_TX_DATA | PB4 | GPIO_OUT_LOW | CC TX, SPI1 MISO |
+| SPI1 SCK | PB3 | | CC TX, SPI1 CLK, directly connect to PB9 |
+| TIM17_CH1 | PB9 | | CLK source for CC TX, directly connect to PB3 |
+| PD_CC1_TX_EN | PA15 | GPIO_OUT_LOW | enable CC TX, any position |
+
+
+* DP signals
+|_.Name |_.Port |_.Type |_.Description|
+| DP_HPD | PA0 | GPIO_INT_BOTH | DP HPD detection, any position |
+| PD_SBU_ENABLE | PA8 | GPIO_OUT_LOW | DP AUX+/- switch, any position |
+
+
+
+h2. Dual CC ports, both receptacles (SAMUS_PD)
+
+* CC signal RX
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_CC1_PD | PA0 | GPIO_ANALOG | Port 0 RX, CC1 |
+| USB_C0_CC2_PD | PA4 | GPIO_ANALOG | Port 0 RX, CC2 |
+| USB_C1_CC1_PD | PA2 | GPIO_ANALOG | Port 1 RX, CC1 |
+| USB_C1_CC2_PD | PA5 | GPIO_ANALOG | Port 1 RX, CC2 |
+| USB_C0_REF | PA1 | GPIO_ANALOG | COMP ref voltage: 0.55V |
+
+
+* CC signal TX, Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_CC1_TX_DATA | PB14 | GPIO_OUT_LOW |  CC TX, SPI2 MISO |
+| USB_C0_CC2_TX_DATA | PD3 | GPIO_OUT_LOW |  CC TX, SPI2 MISO |
+| USB_C0_SPI2_SCK | PB13 | | CC TX, SPI2 CLK |
+| USB_C0_TIM14_CH1 | PB1 | | CLK source for CC TX |
+| USB_C0_CC_TX_EN | PB9 | GPIO_OUT_LOW | any position |
+
+
+* CC signal TX, Port 1
+| USB_C1_CC1_TX_DATA | PB4 | GPIO_OUT_LOW |  CC TX, SPI1 MISO |
+| USB_C1_CC2_TX_DATA | PE14 | GPIO_OUT_LOW |  CC TX, SPI1 MISO |
+| USB_C1_SPI2_SCK | PB3 | | CC TX, SPI1 CLK |
+| USB_C1_TIM14_CH1 | PB1 | | same as port 0 |
+| USB_C1_CC_TX_EN | PA15 | GPIO_OUT_LOW | any position |
+
+
+* DFP VBUS/VCONN handling
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_5V_EN | PD14 | GPIO_OUT_LOW | On detection of UFP, supply 5V to VBUS, port 0 |
+| USB_C0_CC1_VCONN1_EN_L | PD8 | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN, port 0, polarity 0 |
+| USB_C0_CC2_VCONN1_EN_L | PD9 | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN, port 0, polarity 1 |
+| USB_C1_5V_EN | PD15 | GPIO_OUT_LOW | On detection of UFP, supply 5V to VBUS, port 1 |
+| USB_C1_CC1_VCONN1_EN_L | PD10 | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN, port 1, polarity 0 |
+| USB_C1_CC2_VCONN1_EN_L | PD11 | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN, port 1, polarity 1 |
+
+
+* UFP VBUS/VCONN handling
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_VBUS_WAKE | PE6 | GPIO_INT_BOTH | => task_wake(TASK_ID_PD_C0) |
+| USB_C1_VBUS_WAKE | PF2 | GPIO_INT_BOTH | => task_wake(TASK_ID_PD_C1) |
+
+
+* Host/Device mode handling
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_CC1_ODL | PB8 | GPIO_ODR_LOW | Port 0 polarity 0, High-Z: Host mode, Pull low: Device mode|
+| USB_C0_CC2_ODL | PE0 | GPIO_ODR_LOW | Port 0 polarity 1 |
+| USB_C1_CC1_ODL | PF9 | GPIO_ODR_LOW | Port 1 polarity 0 |
+| USB_C1_CC2_ODL | PF10 | GPIO_ODR_LOW | Port 1 polarity 1 |
+
+
+* USB/DP mux signals -- Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C0_SS1_EN_L | PE2 | GPIO_OUT_HIGH | USB3 SuperSpeed lane enable, polarity 0 |
+| USB_C0_SS2_EN_L | PE3 | GPIO_OUT_HIGH | USB3 SuperSpeed lane enable, polarity 1 |
+| USB_C0_SS1_DP_MODE | PE4 | GPIO_OUT_HIGH | polarity 0 |
+| USB_C0_SS2_DP_MODE | PE5 | GPIO_OUT_HIGH | polarity 1 |
+| USB_C0_DP_MODE_L | PE8 | GPIO_OUT_HIGH | |
+| USB_C0_DP_POLARITY | PE7 | GPIO_OUT_HIGH | |
+| USB_C0_DP_HPD | PF0 | GPIO_OUT_LOW | |
+
+
+* USB/DP mux signals -- Port 1
+|_.Name |_.Port |_.Type |_.Description|
+| USB_C1_SS1_EN_L | PE9 | GPIO_OUT_HIGH | USB3 SuperSpeed lane enable, polarity 0 |
+| USB_C1_SS2_EN_L | PE10 | GPIO_OUT_HIGH | USB3 SuperSpeed lane enable, polarity 1 |
+| USB_C1_SS1_DP_MODE | PE11 | GPIO_OUT_HIGH | polarity 0 |
+| USB_C1_SS2_DP_MODE | PE13 | GPIO_OUT_HIGH | polarity 1 |
+| USB_C1_DP_MODE_L | PF6 | GPIO_OUT_HIGH | |
+| USB_C1_DP_POLARITY | PF3 | GPIO_OUT_HIGH | |
+| USB_C1_DP_HPD | PF1 | GPIO_OUT_LOW | |
+
+h2. Dual CC ports (Twinkie)
+
+* CC signals
+|_.Name |_.Port |_.Type |_.Description|
+| CC1_PD | PA1 | GPIO_ANALOG | CC1 RX |
+| CC1_TX_DATA | PB4 | GPIO_OUT_LOW | CC1 TX |
+| CC1_TX_EN | PB1 | GPIO_OUT_LOW | CC1 TX Enable |
+| CC2_PD | PA3 | GPIO_ANALOG | CC2 RX |
+| CC2_TX_DATA | PA6 | GPIO_OUT_LOW | CC2 TX |
+| CC2_TX_EN | PB3 | GPIO_OUT_LOW | CC2 TX Enable |
+
+- - -
+
+
+h1. GPIOs for Type-C Dongles / Docking stations by BizLink
+
+
+h2. Dual CC ports, both receptacles
+
+The portmap defined here is BizLink's dual CC design:
+* port 0: UFP / receptacle
+* port 1: DFP / receptacle
+
+
+* CC signal RX
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_CC1_PD | PA0 | GPIO_ANALOG | Port 0 RX, CC1 |
+| USB_P0_CC2_PD | PA4 | GPIO_ANALOG | Port 0 RX, CC2 |
+| USB_P1_CC1_PD | PA2 | GPIO_ANALOG | Port 1 RX, CC1 |
+| USB_P1_CC2_PD | PA5 | GPIO_ANALOG | Port 1 RX, CC2 |
+| USB_CCRX_REF | PA1 | GPIO_ANALOG | COMP ref voltage: 0.55V, we must use external voltage |
+| USB_CCRX_REF_OUT | PA4 | GPIO_ANALOG | optional, if used, then connect to PA1 |
+
+
+* CC signal TX, Port 0
+| USB_P0_CC_TX_DATA | PB4 | GPIO_OUT_LOW |  CC TX, SPI1 MISO => demux(CC1/CC2, P0_polarity)  |
+| USB_P0_SPI1_SCK | PB3 | | CC TX, SPI1 CLK, PB1 / PB13 / PB3 connected together |
+| USB_P0_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 0 CC TX |
+| USB_CCTX_SPICLK_SRC | PB1 | | CC TX, TIM14 CH1 source to drive SPI CLK, PB1 / PB13 / PB3 connected together |
+
+
+* CC signal TX, Port 1
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P1_CC_TX_DATA | PB14 | GPIO_OUT_LOW |  CC TX, SPI2 MISO => demux(CC1/CC2, P1_polarity) |
+| USB_P1_SPI2_SCK | PB13 | | CC TX, SPI2 CLK, PB1 / PB13 / PB3 connected together |
+| USB_P1_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 1 CC TX |
+
+
+* DFP VBUS/VCONN handling (only for reference now)
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P1_5V_EN | _any_ | GPIO_OUT_LOW | On detection of UFP, supply 5V to VBUS, port 1 |
+| USB_P1_CC_VCONN1_EN_L | _any_ | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN => demux(CC1/CC2, P1_polarity) |
+
+
+* Host/Device mode handling (presentation of Rp or Rd by switch)
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_PWROLE_SRC | _any_ | GPIO_ODR_LOW | Port 0, 1: Host (SRC/Rp) mode, 0: Device (SNK/Rd) mode => demux(CC1/CC2, P0_polarity) |
+| USB_P1_PWROLE_SRC | _any_ | GPIO_ODR_LOW | Port 1, 1: Host (SRC/Rp) mode, 0: Device (SNK/Rd) mode => demux(CC1/CC2, P1_polarity) |
+| USB_P0_VBUS_WAKE | any | GPIO_INT_BOTH | UFP detection of VBUS voltage => task_wake(TASK_ID_PD_C0) |
+| USB_P1_VBUS_WAKE | any | GPIO_INT_BOTH | UFP detection of VBUS voltage => task_wake(TASK_ID_PD_C1) |
+
+
+* USB CC1/CC2 Polarity (orientation)
+| USB_P0_CC_POLARITY | _any_ | GPIO_OUT_LOW | P0_polarity, 0: no flipping, 1: CC1/CC2 flipped |
+| USB_P1_CC_POLARITY | _any_ | GPIO_OUT_LOW | P1_polarity, 0: no flipping, 1: CC1/CC2 flipped |
+
+
+* USB/DP mux signals -- Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_DP_SS_LANE | _any_ | GPIO_OUT_HIGH | 0: Select U3 TX/RX, 1: Select DP ML2/ML3 |
+| USB_P0_DP_HPD | _any_ | GPIO_INT_BOTH | DP HPD detection |
+| USB_P0_SBU_ENABLE | _any_ | GPIO_OUT_LOW | DP AUX+/- switch |
+
+
+* USB/DP mux signals -- Port 1 (not support DP over this port)
+
+
+* UFP Power Provider -- Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_PWR_5V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 5V power to DFP |
+| USB_P0_PWR_12V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 12V power to DFP |
+| USB_P0_PWR_20V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 20V power to DFP |
+| USB_P0_PWR_VBUS_EN | _any_ | GPIO_OUT_HIGH | enable down-feeding of VBUS power from DFP |
+
+
+* Misc signals
+|_.Name |_.Port |_.Type |_.Description|
+| MCU_CHIPS_RESET_EN | _any_ | GPIO_OUT_HIGH | reset of any chips which may be impacted by DP Alt Mode entering/exiting |
+| MCU_DBG_TRIGGER | _any_ | GPIO_OUT_LOW | generate a trigger pulse signal for Scope capture of waveforms |
+
+
+- - -
+
+
+h2. Dual CC ports, plug & receptacle
+
+The portmap defined here is BizLink's dual CC design:
+* port 0: UFP / plug
+* port 1: DFP / receptacle
+
+
+* CC signal RX
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_CC_PD | PA0 | GPIO_ANALOG | Port 0 RX, CC |
+| USB_P1_CC1_PD | PA2 | GPIO_ANALOG | Port 1 RX, CC1 |
+| USB_P1_CC2_PD | PA5 | GPIO_ANALOG | Port 1 RX, CC2 |
+| USB_CCRX_REF | PA1 | GPIO_ANALOG | COMP ref voltage: 0.55V, we may use PA4 for internal DAC out, or external voltage |
+| USB_CCRX_REF_OUT | PA4 | GPIO_ANALOG | optional, if used, then connect to PA1 |
+
+
+* CC signal TX, Port 0
+| USB_P0_CC_TX_DATA | PB4 | GPIO_OUT_LOW |  CC TX, SPI1 MISO |
+| USB_P0_SPI1_SCK | PB3 | | CC TX, SPI1 CLK, PB1 / PB13 / PB3 connected together |
+| USB_P0_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 0 CC TX |
+| USB_CCTX_SPICLK_SRC | PB1 | | CC TX, TIM14 CH1 source to drive SPI CLK, PB1 / PB13 / PB3 connected together |
+
+
+* CC signal TX, Port 1
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P1_CC_TX_DATA | PB14 | GPIO_OUT_LOW |  CC TX, SPI2 MISO => demux(CC1/CC2, P1_polarity) |
+| USB_P1_SPI2_SCK | PB13 | | CC TX, SPI2 CLK, PB1 / PB13 / PB3 connected together |
+| USB_P1_CC_TX_EN | _any_ | GPIO_OUT_LOW | enable port 1 CC TX |
+
+
+* DFP VBUS/VCONN handling (only for reference now)
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P1_5V_EN | _any_ | GPIO_OUT_LOW | On detection of UFP, supply 5V to VBUS, port 1 |
+| USB_P1_CC_VCONN1_EN_L | _any_ | GPIO_OUT_HIGH | On detection of cable Ra, supply power to VCONN => demux(CC1/CC2, P1_polarity) |
+
+
+* Host/Device mode handling (presentation of Rp or Rd by switch)
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_PWROLE_SRC | _any_ | GPIO_ODR_LOW | Port 0, 1: Host (SRC/Rp) mode, 0: Device (SNK/Rd) mode |
+| USB_P1_PWROLE_SRC | _any_ | GPIO_ODR_LOW | Port 1, 1: Host (SRC/Rp) mode, 0: Device (SNK/Rd) mode => demux(CC1/CC2, P1_polarity) |
+| USB_P0_VBUS_WAKE | any | GPIO_INT_BOTH | UFP detection of VBUS voltage => task_wake(TASK_ID_PD_C0) |
+| USB_P1_VBUS_WAKE | any | GPIO_INT_BOTH | UFP detection of VBUS voltage => task_wake(TASK_ID_PD_C1) |
+
+
+* USB CC1/CC2 Polarity (orientation)
+| USB_P1_CC_POLARITY | _any_ | GPIO_OUT_LOW | P1_polarity, 0: no flipping, 1: CC1/CC2 flipped |
+
+
+* USB/DP mux signals -- Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_DP_SS_LANE | _any_ | GPIO_OUT_HIGH | 0: Select U3 TX/RX, 1: Select DP ML2/ML3 |
+| USB_P0_DP_HPD | _any_ | GPIO_INT_BOTH | DP HPD detection |
+| USB_P0_SBU_ENABLE | _any_ | GPIO_OUT_LOW | DP AUX+/- switch |
+
+
+* USB/DP mux signals -- Port 1 (not support DP over this port)
+
+
+* UFP Power Provider -- Port 0
+|_.Name |_.Port |_.Type |_.Description|
+| USB_P0_PWR_5V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 5V power to DFP |
+| USB_P0_PWR_12V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 12V power to DFP |
+| USB_P0_PWR_20V_EN | _any_ | GPIO_OUT_HIGH | enable up-feeding of 20V power to DFP |
+| USB_P0_PWR_VBUS_EN | _any_ | GPIO_OUT_HIGH | enable down-feeding of VBUS power from DFP |
+
+
+* Misc signals
+|_.Name |_.Port |_.Type |_.Description|
+| MCU_CHIPS_RESET_EN | _any_ | GPIO_OUT_HIGH | reset of any chips which may be impacted by DP Alt Mode entering/exiting |
+| MCU_DBG_TRIGGER | _any_ | GPIO_OUT_LOW | generate a trigger pulse signal for Scope capture of waveforms |
+
+

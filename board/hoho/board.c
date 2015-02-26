@@ -38,6 +38,7 @@ void hpd_event(enum gpio_signal signal);
  * The debounce times for these various events are:
  *  100MSEC : min pulse width of level value.
  *    2MSEC : min pulse width of IRQ low pulse.  Max is level debounce min.
+ *  150USEC : below of this means glitch  --- BXU
  *
  * lvl(n-2) lvl(n-1)  lvl   prev_delta  now_delta event
  * ----------------------------------------------------
@@ -79,13 +80,13 @@ void hpd_event(enum gpio_signal signal)
 	hook_call_deferred(hpd_lvl_deferred, -1);
 
 	/* It's a glitch.  Previous time moves but level is the same. */
-	if (cur_delta < HPD_DEBOUNCE_IRQ)
+	if (cur_delta < HPD_DEBOUNCE_GLITCH)
 		return;
 
-	if ((!hpd_prev_level && level) && (cur_delta < HPD_DEBOUNCE_LVL))
+	if ((!hpd_prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
 		/* It's an irq */
 		hook_call_deferred(hpd_irq_deferred, 0);
-	else if (cur_delta >= HPD_DEBOUNCE_LVL)
+	else if (cur_delta > HPD_DEBOUNCE_IRQ)
 		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 
 	hpd_prev_level = level;

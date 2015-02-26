@@ -38,7 +38,7 @@
  * Note that higher log level causes timing changes and thus may affect
  * performance.
  */
-static int debug_level;
+static int debug_level = 1;
 #else
 #define CPRINTF(format, args...)
 const int debug_level;
@@ -191,10 +191,18 @@ static const uint8_t dec4b5b[] = {
 #define PD_CAPS_COUNT 50
 
 /* Port role at startup */
+#if 0
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 #define PD_ROLE_DEFAULT PD_ROLE_SINK
 #else
 #define PD_ROLE_DEFAULT PD_ROLE_SOURCE
+#endif
+#else
+#ifdef CONFIG_BIZ_EMU_HOST
+#define PD_ROLE_DEFAULT PD_ROLE_SOURCE
+#else
+#define PD_ROLE_DEFAULT PD_ROLE_SINK
+#endif
 #endif
 
 enum vdm_states {
@@ -1765,6 +1773,9 @@ void pd_task(void)
 
 	/* Initialize PD protocol state variables for each port. */
 	pd[port].power_role = PD_ROLE_DEFAULT;
+#ifdef CONFIG_BIZ_EMU_HOST
+	drp_state = PD_DRP_FORCE_SOURCE;
+#endif
 	pd_set_data_role(port, PD_ROLE_DEFAULT);
 	pd[port].vdm_state = VDM_STATE_DONE;
 	pd[port].flags = 0;
@@ -1780,6 +1791,11 @@ void pd_task(void)
 	pd_set_input_current_limit(port, 0, 0);
 	typec_set_input_current_limit(port, 0, 0);
 	charge_manager_update_dualrole(port, CAP_UNKNOWN);
+#endif
+
+#ifdef CONFIG_BIZ_EMU_HOST
+        gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 1);
+        gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 1);
 #endif
 
 	while (1) {
@@ -1911,6 +1927,7 @@ void pd_task(void)
 				pd[port].polarity =
 					DFP_GET_POLARITY(cc1_volt, cc2_volt);
 				pd_select_polarity(port, pd[port].polarity);
+				CPRINTF("ST.%d:%d cc1=%d cc2=%d pol=%d\n", port, this_state, cc1_volt, cc2_volt, pd[port].polarity); // BXU
 #ifdef CONFIG_USBC_SS_MUX
 				board_set_usb_mux(port, TYPEC_MUX_USB,
 						  pd[port].polarity);
@@ -2324,6 +2341,7 @@ void pd_task(void)
 			pd[port].polarity =
 				UFP_GET_POLARITY(cc1_volt, cc2_volt);
 			pd_select_polarity(port, pd[port].polarity);
+			CPRINTF("ST.%d:%d cc1=%d cc2=%d pol=%d\n", port, this_state, cc1_volt, cc2_volt, pd[port].polarity); // BXU
 			/* reset message ID  on connection */
 			pd[port].msg_id = 0;
 			/* initial data role for sink is UFP */
@@ -2916,6 +2934,8 @@ void pd_send_hpd(int port, enum hpd_event hpd)
 				0x2);
 	pd_send_vdm(port, USB_SID_DISPLAYPORT,
 		    VDO_OPOS(opos) | CMD_ATTENTION, data, 1);
+	if (debug_level >= 1)
+		CPRINTF("VDM/HPD %08x - %d\n", data[0], hpd);
 	/* Wait until VDM is done. */
 	while (pd[0].vdm_state > 0)
 		task_wait_event(USB_PD_RX_TMOUT_US * (PD_RETRY_COUNT + 1));
@@ -3216,6 +3236,63 @@ DECLARE_CONSOLE_COMMAND(typec, command_typec,
 			"Control type-C connector muxing",
 			NULL);
 #endif /* CONFIG_CMD_TYPEC */
+#endif /* CONFIG_USBC_SS_MUX */
+
+#ifdef CONFIG_BIZ_EMU_HOST
+static int command_amode(int argc, char **argv)
+{
+	const char * const cmd_name[] = {"enter", "exit", "2", "4"};
+	char *e;
+	uint32_t data[2];
+	int port;
+	int cmd = -1;
+	int i;
+
+	if (argc < 2)
+		return EC_ERROR_PARAM_COUNT;
+
+	port = strtoi(argv[1], &e, 10);
+	if (*e || port >= PD_PORT_COUNT)
+		return EC_ERROR_PARAM1;
+
+	if (argc < 3) {
+		ccprintf("Port C%d: CC1 %d mV  CC2 %d mV (polarity:CC%d)\n",
+			port, pd_adc_read(port, 0), pd_adc_read(port, 1),
+			pd_get_polarity(port) + 1);
+		return EC_SUCCESS;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(cmd_name); i++)
+		if (!strcasecmp(argv[2], cmd_name[i]))
+			cmd = i;
+
+	switch(cmd) {
+	case 0: // ENTER Mode
+		break;
+	case 1: // EXIT  Mode
+		break;
+	case 2: // Config 2 lanes Mode
+	case 3: // Config 4 lanes Mode
+		data[0] = VDO_DP_CFG(
+				(cmd==3)? MODE_DP_PIN_C : MODE_DP_PIN_D, /* sink pins */
+				(cmd==3)? MODE_DP_PIN_C : MODE_DP_PIN_D, /* src pins */
+				1,             /* DPv1.3 signaling */
+				2);            /* UFP connected */
+		pd_send_vdm(port, USB_SID_DISPLAYPORT,
+			CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port, USB_SID_DISPLAYPORT)), data, 1);
+		board_set_usb_mux(port, (cmd==3)? TYPEC_MUX_DP : TYPEC_MUX_DOCK,
+			pd_get_polarity(port));
+		break;
+	default:
+		return EC_ERROR_UNIMPLEMENTED;
+	}
+
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(amode, command_amode,
+			"<port> [enter|exit|2|4]",
+			"Control type-C DP Alt Mode Configuration",
+			NULL);
 #endif /* CONFIG_USBC_SS_MUX */
 
 static int hc_pd_ports(struct host_cmd_handler_args *args)

@@ -496,6 +496,9 @@ struct pd_policy {
 #define MODE_DP_SRC  0x2
 #define MODE_DP_BOTH 0x3
 
+#define PD_VDO_AMA_SNK_PINS(mode)       (((mode) >> 16) & 0xff)
+#define PD_VDO_AMA_SRC_PINS(mode)       (((mode) >> 8)  & 0xff)
+
 /*
  * DisplayPort Status VDO
  * ----------------------
@@ -518,8 +521,9 @@ struct pd_policy {
 #define PD_VDO_HPD_IRQ(x) ((x >> 8) & 1)
 #define PD_VDO_HPD_LVL(x) ((x >> 7) & 1)
 
-#define HPD_DEBOUNCE_LVL (100*MSEC)
-#define HPD_DEBOUNCE_IRQ (2*MSEC)
+#define HPD_DEBOUNCE_LVL    (100*MSEC)
+#define HPD_DEBOUNCE_IRQ    (2*MSEC)
+#define HPD_DEBOUNCE_GLITCH  250 /* USEC */
 /*
  * DisplayPort Configure VDO
  * -------------------------
@@ -571,7 +575,8 @@ struct pd_policy {
 
 #define USB_GOOGLE_TYPEC_URL "http://www.google.com/chrome/devices/typec"
 /* USB Vendor ID assigned to Google Inc. */
-#define USB_VID_GOOGLE 0x18d1
+#define USB_VID_GOOGLE  0x18d1
+#define USB_VID_BIZLINK 0x06C4
 
 /* Timeout for message receive in microseconds */
 #define USB_PD_RX_TMOUT_US 1800
