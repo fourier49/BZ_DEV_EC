@@ -32,6 +32,7 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
+volatile int check_app;
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 /**
@@ -70,6 +71,10 @@ USBD_Status  USBD_CtlContinueSendData (USB_CORE_HANDLE  *pdev,
                                        uint16_t len)
 {
   USBD_Status ret = USBD_OK;
+  
+  // if dfu app is launched, this function will be called twice     ==> check_app = 2
+  // if not launched, then this function will only be called once;  ==> check_app = 1
+  check_app ++;
   
   DCD_EP_Tx (pdev, 0, pbuf, len);
   

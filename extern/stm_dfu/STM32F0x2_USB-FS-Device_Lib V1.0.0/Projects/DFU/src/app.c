@@ -38,6 +38,13 @@ USB_CORE_HANDLE  USB_Device_dev ;
 pFunction Jump_To_Application;
 uint32_t JumpAddress;
 
+/* check whether dfu app is launched
+	0 = initialized value
+	1 = enter app mode
+	2 = enter dfu mode
+*/
+extern volatile int check_app;
+
 /* Private function prototypes -----------------------------------------------*/
 #ifdef __GNUC__
   /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
@@ -109,6 +116,9 @@ int main(void)
        To reconfigure the default setting of SystemInit() function, refer to
        system_stm32f0xx.c file
       */  
+	unsigned i = 0;
+	
+  ///////////////////////////////////////////////////
   /* USART configuration */
   USART1_Config();
   printf("dfu boot start... %s %s\n\r", __DATE__, __TIME__);
@@ -117,6 +127,8 @@ int main(void)
     /* Configure "DFU enter" button */
   STM_EVAL_PBInit(BUTTON_SEL, Mode_GPIO);
   
+  // original switch between dfu/app mode via reset/user button, removed
+#if 0
   /* Check if the TAMPER push-button on STM32-EVAL Board is pressed */
   if (STM_EVAL_PBGetState(BUTTON_SEL) == 0x00)
   { /* Test if user code is programmed starting from address 0x8003000 */
@@ -130,6 +142,7 @@ int main(void)
       Jump_To_Application();
     }
   } /* Otherwise enters DFU mode to allow user to program his application */
+#endif
   
   /* The Application layer has only to call USBD_Init to 
   initialize the USB low level driver, the USB device library, the USB clock 
@@ -142,15 +155,41 @@ int main(void)
   
   /* Setup SysTick Timer for 10 msec interrupts 
   This interrupt is used to display the current state of the DFU core */
+#if 0 // removed, it causes continuous reset after jumping to user application (happened on hoho/ec.RW.bin)
   if (SysTick_Config(SystemCoreClock / 100))
   { 
     /* Capture error */ 
-    while (1);
+    while (1) {
+		}
   }
- 
-  while (1)
+#endif
+
+  // fake delay loop of 200 ms
+  for (i=0; i<200; i++)
   {
+    int j;
+    // sleep 1ms
+	for (j=0; j<100; j++)
+	  printf("%d", check_app);
   }
+
+  // jump to user application	
+  if (check_app == 1)
+  { /* Jump to user application */
+    JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
+		printf("JumpAddress: %x\r\n", JumpAddress);
+    Jump_To_Application = (pFunction) JumpAddress;
+	printf("\r\nJump to APP... %x\r\n", Jump_To_Application);
+    /* Initialize user application's Stack Pointer */
+    __set_MSP(*(__IO uint32_t*) APP_DEFAULT_ADD);
+    Jump_To_Application();
+  }
+
+  // stay at boot loader
+  printf("\r\nstay at boot loader\r\n");
+  
+  while (1) {}
+
 } 
 
 
