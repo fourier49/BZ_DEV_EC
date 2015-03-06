@@ -52,7 +52,7 @@
 /* Flash memory address from where user application will be loaded 
    This address represents the DFU code protected against write and erase operations.*/
 
-#define APP_DEFAULT_ADD                 0x08003000
+#define APP_DEFAULT_ADD                 0x08010000   // address of chromium-ec RW image
 
 /* Exported macro ------------------------------------------------------------*/
 /* Update this define to modify the DFU protected area.
