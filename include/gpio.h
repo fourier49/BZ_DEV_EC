@@ -54,7 +54,7 @@ struct gpio_info {
 	uint32_t port;
 
 	/* Bitmask on that port (1 << N; 0 = signal not implemented) */
-	int mask;
+	uint32_t mask;
 
 	/* Flags (GPIO_*; see above) */
 	uint32_t flags;
@@ -70,18 +70,6 @@ struct gpio_info {
 /* Signal information from board.c.  Must match order from enum gpio_signal. */
 extern const struct gpio_info gpio_list[];
 
-/*
- * Define the storage size for the pin muxing information.
- *
- * int8_t is more optimal for storage size and alignment,
- * but some chips require to store more information.
- */
-#ifdef CONFIG_GPIO_LARGE_ALT_INFO
-typedef uint32_t alt_func_t;
-#else
-typedef int8_t alt_func_t;
-#endif
-
 /* GPIO alternate function structure, for use by board.c */
 struct gpio_alt_func {
 	/* Port base address */
@@ -91,7 +79,7 @@ struct gpio_alt_func {
 	uint32_t mask;
 
 	/* Alternate function number */
-	alt_func_t func;
+	uint8_t func;
 
 	/* Module ID (as uint8_t, since enum would be 32-bit) */
 	uint8_t module_id;

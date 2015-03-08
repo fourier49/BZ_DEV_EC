@@ -15,14 +15,16 @@
 #undef CONFIG_HIBERNATE
 #undef CONFIG_LID_SWITCH
 
-/* Need space to store the pin muxing configuration */
-#define CONFIG_GPIO_LARGE_ALT_INFO
-
 /*
  * Allow dangerous commands all the time, since we don't have a write protect
  * switch.
  */
 #define CONFIG_SYSTEM_UNLOCKED
+
+/* Not using software sync, so verify RW signature instead */
+#define CONFIG_RWSIG
+#define CONFIG_RSA
+#define CONFIG_SHA256
 
 #ifndef __ASSEMBLER__
 

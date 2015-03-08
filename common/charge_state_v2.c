@@ -50,6 +50,8 @@ static int battery_seems_to_be_dead;
 static int battery_seems_to_be_disconnected;
 static int problems_exist;
 static int debugging;
+static int fake_state_of_charge = -1;
+
 
 /* Track problems in communicating with the battery or charger */
 enum problem_type {
@@ -522,21 +524,9 @@ const struct batt_params *charger_current_battery_params(void)
 
 void charger_init(void)
 {
-	const struct charger_info * const info = charger_get_info();
-
 	/* Initialize current state */
 	memset(&curr, 0, sizeof(curr));
 	curr.batt.is_present = BP_NOT_SURE;
-
-	/*
-	 * If system is not locked, then use max input current limit so
-	 * that if there is no battery present, we can pull as much power
-	 * as needed. If battery is present, then input current will be
-	 * immediately lowered to the real desired value.
-	 */
-	curr.desired_input_current = system_is_locked() ?
-					CONFIG_CHARGER_INPUT_CURRENT :
-					info->input_current_max;
 }
 DECLARE_HOOK(HOOK_INIT, charger_init, HOOK_PRIO_DEFAULT);
 
@@ -554,6 +544,17 @@ void charger_task(void)
 	state_machine_force_idle = 0;
 	shutdown_warning_time.val = 0UL;
 	battery_seems_to_be_dead = 0;
+
+	/*
+	 * If system is not locked and we don't have a battery to live on,
+	 * then use max input current limit so that we can pull as much power
+	 * as needed.
+	 */
+	battery_get_params(&curr.batt);
+	if (curr.batt.is_present == BP_YES || system_is_locked())
+		curr.desired_input_current = CONFIG_CHARGER_INPUT_CURRENT;
+	else
+		curr.desired_input_current = info->input_current_max;
 
 	while (1) {
 
@@ -597,6 +598,12 @@ void charger_task(void)
 		}
 		charger_get_params(&curr.chg);
 		battery_get_params(&curr.batt);
+
+		/* Fake state of charge if necessary */
+		if (fake_state_of_charge >= 0) {
+			curr.batt.state_of_charge = fake_state_of_charge;
+			curr.batt.flags &= ~BATT_FLAG_BAD_STATE_OF_CHARGE;
+		}
 
 		/*
 		 * TODO(crosbug.com/p/27527). Sometimes the battery thinks its
@@ -982,12 +989,12 @@ static int charge_command_charge_control(struct host_cmd_handler_args *args)
 
 	rv = charge_force_idle(p->mode != CHARGE_CONTROL_NORMAL);
 	if (rv != EC_SUCCESS)
-		return rv;
+		return EC_RES_ERROR;
 
 #ifdef CONFIG_CHARGER_DISCHARGE_ON_AC
 	rv = board_discharge_on_ac(p->mode == CHARGE_CONTROL_DISCHARGE);
 	if (rv != EC_SUCCESS)
-		return rv;
+		return EC_RES_ERROR;
 #endif
 
 	return EC_RES_SUCCESS;
@@ -1121,6 +1128,30 @@ DECLARE_HOST_COMMAND(EC_CMD_CHARGE_STATE, charge_command_charge_state,
 
 /*****************************************************************************/
 /* Console commands */
+
+static int command_battfake(int argc, char **argv)
+{
+	char *e;
+	int v;
+
+	if (argc == 2) {
+		v = strtoi(argv[1], &e, 0);
+		if (*e || v < -1 || v > 100)
+			return EC_ERROR_PARAM1;
+
+		fake_state_of_charge = v;
+	}
+
+	if (fake_state_of_charge >= 0)
+		ccprintf("Fake batt %d%%\n",
+			 fake_state_of_charge);
+
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(battfake, command_battfake,
+			"percent (-1 = use real level)",
+			"Set fake battery level",
+			NULL);
 
 static int command_chgstate(int argc, char **argv)
 {

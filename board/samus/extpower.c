@@ -35,6 +35,9 @@ static int bkboost_detected;
 /* Charging is disabled */
 static int charge_is_disabled;
 
+/* Extpower task has been initialized */
+static int extpower_task_initialized;
+
 /*
  * Charge circuit occasionally gets wedged and doesn't charge.
  * This variable keeps track of the state of the circuit.
@@ -70,10 +73,12 @@ DECLARE_HOOK(HOOK_CHIPSET_SHUTDOWN, extpower_shutdown, HOOK_PRIO_DEFAULT);
 
 void extpower_interrupt(enum gpio_signal signal)
 {
+	/* Trigger notification of external power change */
 	extpower_buffer_to_pch();
 
-	/* Trigger notification of external power change */
-	task_wake(TASK_ID_EXTPOWER);
+	/* Wake extpower task only if task has been initialized */
+	if (extpower_task_initialized)
+		task_wake(TASK_ID_EXTPOWER);
 }
 
 static void extpower_init(void)
@@ -114,8 +119,10 @@ DECLARE_HOOK(HOOK_CHIPSET_RESUME, cancel_charging_cutoff, HOOK_PRIO_DEFAULT);
 static void batt_soc_change(void)
 {
 	/* If in S0, leave charging alone */
-	if (chipset_in_state(CHIPSET_STATE_ON))
+	if (chipset_in_state(CHIPSET_STATE_ON)) {
+		host_command_pd_send_status(PD_CHARGE_NO_CHANGE);
 		return;
+	}
 
 	/* Check to disable or enable charging based on batt state of charge */
 	if (!charge_is_disabled && charge_get_percent() == 100) {
@@ -124,6 +131,9 @@ static void batt_soc_change(void)
 	} else if (charge_is_disabled && charge_get_percent() < 100) {
 		charge_is_disabled = 0;
 		host_command_pd_send_status(PD_CHARGE_5V);
+	} else {
+		/* Leave charging alone, but update battery SOC */
+		host_command_pd_send_status(PD_CHARGE_NO_CHANGE);
 	}
 }
 DECLARE_HOOK(HOOK_BATTERY_SOC_CHANGE, batt_soc_change, HOOK_PRIO_DEFAULT);
@@ -284,7 +294,7 @@ static int log_charge_wedged(void)
 
 static void check_charge_wedged(void)
 {
-	int rv, prochot_status, boostin_voltage;
+	int rv, prochot_status, batt_discharging_on_ac, boostin_voltage = 0;
 	static int counts_since_wedged;
 	static int charge_stalled_count = CHARGE_STALLED_COUNT;
 	uint8_t *batt_flags = host_get_memmap(EC_MEMMAP_BATT_FLAG);
@@ -296,13 +306,22 @@ static void check_charge_wedged(void)
 		if (rv)
 			prochot_status = 0;
 
+		batt_discharging_on_ac =
+			(*batt_flags & EC_BATT_FLAG_AC_PRESENT) &&
+			(*batt_flags & EC_BATT_FLAG_DISCHARGING);
+
+		/*
+		 * If PROCHOT is set or we are discharging on AC, then we
+		 * need to know boostin_voltage.
+		 */
+		if (prochot_status || batt_discharging_on_ac)
+			boostin_voltage = get_boostin_voltage();
+
 		/*
 		 * If AC is present, and battery is discharging, and
 		 * boostin voltage is above 5V, then we might be wedged.
 		 */
-		if ((*batt_flags & EC_BATT_FLAG_AC_PRESENT) &&
-		    (*batt_flags & EC_BATT_FLAG_DISCHARGING)) {
-			boostin_voltage = get_boostin_voltage();
+		if (batt_discharging_on_ac) {
 			if (boostin_voltage > 6000)
 				charge_stalled_count--;
 			else if (boostin_voltage >= 0)
@@ -321,15 +340,17 @@ static void check_charge_wedged(void)
 			counts_since_wedged++;
 
 		/*
-		 * If PROCHOT is asserted, then charge circuit is wedged. If
-		 * charging has been stalled long enough, then also consider
-		 * the circuit wedged. To unwedge the charge circuit turn
-		 * on learn mode and notify PD to disable charging on all ports.
+		 * If PROCHOT is asserted AND boost_in voltage is above 5V,
+		 * then charge circuit is wedged. If charging has been stalled
+		 * long enough, then also consider the circuit wedged.
+		 *
+		 * To unwedge the charge circuit turn on learn mode and notify
+		 * PD to disable charging on all ports.
 		 * Note: learn mode is critical here because when in this state
 		 * backboosting causes >20V on boostin even after PD disables
 		 * CHARGE_EN lines.
 		 */
-		if ((prochot_status &&
+		if ((prochot_status && boostin_voltage > 6000 &&
 			counts_since_wedged >= MIN_COUNTS_BETWEEN_UNWEDGES) ||
 		    charge_stalled_count <= 0) {
 			counts_since_wedged = 0;
@@ -369,6 +390,7 @@ void extpower_task(void)
 
 	extpower_board_hacks(extpower, extpower_prev);
 	extpower_prev = extpower;
+	extpower_task_initialized = 1;
 
 	/* Enable backboost detection interrupt */
 	gpio_enable_interrupt(GPIO_BKBOOST_DET);
@@ -376,8 +398,12 @@ void extpower_task(void)
 	while (1) {
 		if (task_wait_event(CHARGE_WEDGE_CHECK_INTERVAL) ==
 		    TASK_EVENT_TIMER) {
-			/* Periodically check if charge circuit is wedged */
-			check_charge_wedged();
+			/*
+			 * If we are NOT purposely discharging on AC, then
+			 * periodically check if charge circuit is wedged.
+			 */
+			if (!board_is_discharging_on_ac())
+				check_charge_wedged();
 		} else {
 			/* Must have received power change interrupt */
 			extpower = extpower_is_present();

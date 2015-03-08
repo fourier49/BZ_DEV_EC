@@ -84,6 +84,7 @@ static const struct lightbar_params_v1 default_params = {
 	.tap_gate_delay = 200 * MSEC,		/* segment gating delay */
 	.tap_display_time = 3 * SECOND,		/* total sequence time */
 
+	/* TODO (crosbug.com/p/36996): remove unused tap_pct_red */
 	.tap_pct_red = 14,			/* below this is red */
 	.tap_pct_green = 94,			/* above this is green */
 	.tap_seg_min_on = 35,		        /* min intensity (%) for "on" */
@@ -864,6 +865,9 @@ static uint32_t sequence_KONAMI(void)
 	int tmp;
 	uint32_t r;
 
+	/* First clear all segments */
+	lb_set_rgb(NUM_LEDS, 0, 0, 0);
+
 	/* Force brightness to max, then restore it */
 	tmp = lb_get_brightness();
 	lb_set_brightness(255);
@@ -872,6 +876,7 @@ static uint32_t sequence_KONAMI(void)
 	return r;
 }
 
+#ifdef CONFIG_LIGHTBAR_TAP_DIM_LAST_SEGMENT
 /* Returns 0.0 to 1.0 for val in [min, min + ofs] */
 static int range(int val, int min, int ofs)
 {
@@ -881,6 +886,7 @@ static int range(int val, int min, int ofs)
 		return FP_SCALE;
 	return (val - min) * FP_SCALE / ofs;
 }
+#endif
 
 /* Handy constant */
 #define CUT (100 / NUM_LEDS)
@@ -891,19 +897,22 @@ static uint32_t sequence_TAP_inner(int dir)
 	timestamp_t start, now;
 	uint32_t elapsed_time = 0;
 	int i, l, ci, max_led;
-	int f_min, f_delta, f_osc, f_power, f_mult;
+	int f_osc, f_mult;
 	int gi, gr, gate[NUM_LEDS] = {0, 0, 0, 0};
 	uint8_t w = 0;
+#ifdef CONFIG_LIGHTBAR_TAP_DIM_LAST_SEGMENT
+	int f_min, f_delta, f_power;
 
 	f_min = st.p.tap_seg_min_on * FP_SCALE / 100;
 	f_delta = (st.p.tap_seg_max_on - st.p.tap_seg_min_on) * FP_SCALE / 100;
+#endif
 	f_osc = st.p.tap_seg_osc * FP_SCALE / 100;
 
 	start = get_time();
 	while (1) {
 		get_battery_level();
 
-		if (st.battery_percent < st.p.tap_pct_red)
+		if (st.battery_level == 0)
 			base_color = RED;
 		else if (st.battery_percent > st.p.tap_pct_green)
 			base_color = GREEN;
@@ -923,6 +932,7 @@ static uint32_t sequence_TAP_inner(int dir)
 
 		for (i = 0; i < NUM_LEDS; i++) {
 
+#ifdef CONFIG_LIGHTBAR_TAP_DIM_LAST_SEGMENT
 			if (max_led > i) {
 				f_mult = FP_SCALE;
 			} else if (max_led < i) {
@@ -931,7 +941,7 @@ static uint32_t sequence_TAP_inner(int dir)
 				switch (base_color) {
 				case RED:
 					f_power = range(st.battery_percent, 0,
-							st.p.tap_pct_red - 1);
+						st.p.battery_threshold[0] - 1);
 					break;
 				case YELLOW:
 					f_power = range(st.battery_percent,
@@ -943,6 +953,12 @@ static uint32_t sequence_TAP_inner(int dir)
 				}
 				f_mult = f_min + f_power * f_delta / FP_SCALE;
 			}
+#else
+			if (max_led >= i)
+				f_mult = FP_SCALE;
+			else if (max_led < i)
+				f_mult = 0;
+#endif
 
 			f_mult = f_mult * gate[i] / FP_SCALE;
 

@@ -310,8 +310,8 @@ void system_disable_jump(void)
 
 test_mockable enum system_image_copy_t system_get_image_copy(void)
 {
-	/* TODO: (ML) return which region is used in Code RAM */
 #ifdef CONFIG_CODERAM_ARCH
+	/* Return which region is used in Code RAM */
 	return system_get_shrspi_image_copy();
 #else
 	uintptr_t my_addr = (uintptr_t)system_get_image_copy -
@@ -477,8 +477,8 @@ int system_run_image_copy(enum system_image_copy_t copy)
 	if (base == 0xffffffff)
 		return EC_ERROR_INVAL;
 
-	/* TODO: (ML) jump to little FW for code ram architecture */
 #ifdef CONFIG_CODERAM_ARCH
+	/* Jump to little FW for code ram architecture */
 	init_addr = system_get_lfw_address(base);
 #else
 	/* Make sure the reset vector is inside the destination image */
@@ -574,6 +574,16 @@ const char *system_get_build_info(void)
 void system_common_pre_init(void)
 {
 	uintptr_t addr;
+
+#ifdef CONFIG_SOFTWARE_PANIC
+	/*
+	 * Log panic cause if watchdog caused reset. This
+	 * must happen before calculating jump_data address
+	 * because it might change panic pointer.
+	 */
+	if (system_get_reset_flags() & RESET_FLAG_WATCHDOG)
+		panic_log_watchdog();
+#endif
 
 	/*
 	 * Put the jump data before the panic data, or at the end of RAM if

@@ -9,6 +9,8 @@
 #ifndef __CROS_EC_PANIC_H
 #define __CROS_EC_PANIC_H
 
+#include "software_panic.h"
+
 #include <stdarg.h>
 
 /* ARM Cortex-Mx registers saved on panic */
@@ -60,11 +62,13 @@ struct panic_data {
 
 /* Flags for panic_data.flags */
 /* panic_data.frame is valid */
-#define PANIC_DATA_FLAG_FRAME_VALID (1 << 0)
+#define PANIC_DATA_FLAG_FRAME_VALID    (1 << 0)
 /* Already printed at console */
-#define PANIC_DATA_FLAG_OLD_CONSOLE (1 << 1)
+#define PANIC_DATA_FLAG_OLD_CONSOLE    (1 << 1)
 /* Already returned via host command */
-#define PANIC_DATA_FLAG_OLD_HOSTCMD (1 << 2)
+#define PANIC_DATA_FLAG_OLD_HOSTCMD    (1 << 2)
+/* Already reported via host event */
+#define PANIC_DATA_FLAG_OLD_HOSTEVENT  (1 << 3)
 
 /**
  * Write a string to the panic reporting device
@@ -119,6 +123,20 @@ void panic(const char *msg);
  * Display a default message and reset
  */
 void panic_reboot(void);
+
+#ifdef CONFIG_SOFTWARE_PANIC
+/**
+ * Store a panic log and halt the system for a software-related reason, such as
+ * stack overflow or assertion failure.
+ */
+void software_panic(uint32_t panic_reason, uint32_t panic_info);
+
+/**
+ * Log a watchdog panic in the panic log. Called on the subsequent reboot after
+ * the watchdog fires.
+ */
+void panic_log_watchdog(void);
+#endif
 
 /**
  * Enable/disable bus fault handler

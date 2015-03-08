@@ -131,7 +131,13 @@ static inline void rtc_read(uint32_t *rtc, uint32_t *rtcss)
 	/* Read current time synchronously */
 	do {
 		*rtc = STM32_RTC_TR;
-		*rtcss = STM32_RTC_SSR;
+		/*
+		 * RTC_SSR must be read twice with identical values because
+		 * glitches may occur for reads close to the RTCCLK edge.
+		 */
+		do {
+			*rtcss = STM32_RTC_SSR;
+		} while (*rtcss != STM32_RTC_SSR);
 	} while (*rtc != STM32_RTC_TR);
 }
 
@@ -158,6 +164,12 @@ void set_rtc_alarm(uint32_t delay_s, uint32_t delay_us,
 	alarm_us = (RTC_PREDIV_S - *rtcss) * US_PER_RTC_TICK + delay_us;
 	alarm_sec = alarm_sec + alarm_us / SECOND;
 	alarm_us = alarm_us % 1000000;
+	/*
+	 * If seconds is greater than 1 day, subtract by 1 day to deal with
+	 * 24-hour rollover.
+	 */
+	if (alarm_sec >= 86400)
+		alarm_sec -= 86400;
 
 	/* Set alarm time */
 	STM32_RTC_ALRMAR = sec_to_rtc(alarm_sec);
@@ -397,7 +409,8 @@ void __idle(void)
 			/* Calculate how close we were to missing deadline */
 			margin_us = next_delay - rtc_diff;
 			if (margin_us < 0)
-				CPRINTS("overslept by %dus", -margin_us);
+				/* Use CPUTS to save stack space */
+				CPUTS("Idle overslept!\n");
 
 			/* Record the closest to missing a deadline. */
 			if (margin_us < dsleep_recovery_margin_us)
@@ -514,6 +527,7 @@ DECLARE_CONSOLE_COMMAND(rtc_alarm, command_rtc_alarm_test,
 #endif /* CONFIG_CMD_RTC_ALARM */
 
 #if defined(CONFIG_LOW_POWER_IDLE) && defined(CONFIG_COMMON_RUNTIME)
+#ifdef CONFIG_CMD_IDLE_STATS
 /**
  * Print low power idle statistics
  */
@@ -535,5 +549,6 @@ DECLARE_CONSOLE_COMMAND(idlestats, command_idle_stats,
 			"",
 			"Print last idle stats",
 			NULL);
+#endif /* CONFIG_CMD_IDLE_STATS */
 #endif
 

@@ -6,7 +6,6 @@
 /* USART driver for Chrome EC */
 
 #include "atomic.h"
-#include "clock.h"
 #include "common.h"
 #include "gpio.h"
 #include "registers.h"
@@ -15,59 +14,50 @@
 #include "usart.h"
 #include "util.h"
 
-static size_t usart_read(struct in_stream const *stream,
-			 uint8_t *buffer,
-			 size_t count)
+static void usart_written(struct consumer const *consumer, size_t count)
 {
 	struct usart_config const *config =
-		DOWNCAST(stream, struct usart_config, in);
-
-	return QUEUE_REMOVE_UNITS(&config->rx, buffer, count);
-}
-
-static size_t usart_write(struct out_stream const *stream,
-			  uint8_t const *buffer,
-			  size_t count)
-{
-	struct usart_config const *config =
-		DOWNCAST(stream, struct usart_config, out);
-
-	size_t wrote = QUEUE_ADD_UNITS(&config->tx, buffer, count);
+		DOWNCAST(consumer, struct usart_config, consumer);
 
 	/*
 	 * Enable USART interrupt.  This causes the USART interrupt handler to
 	 * start fetching from the TX queue if it wasn't already.
 	 */
-	if (wrote)
+	if (count)
 		STM32_USART_CR1(config->hw->base) |= STM32_USART_CR1_TXEIE;
-
-	return wrote;
 }
 
-static void usart_flush(struct out_stream const *stream)
+static void usart_flush(struct consumer const *consumer)
 {
 	struct usart_config const *config =
-		DOWNCAST(stream, struct usart_config, out);
+		DOWNCAST(consumer, struct usart_config, consumer);
 
-	while (queue_count(&config->tx))
+	/*
+	 * Enable USART interrupt.  This causes the USART interrupt handler to
+	 * start fetching from the TX queue if it wasn't already.
+	 */
+	STM32_USART_CR1(config->hw->base) |= STM32_USART_CR1_TXEIE;
+
+	while (queue_count(consumer->queue))
 		;
 }
 
-struct in_stream_ops const usart_in_stream_ops = {
-	.read = usart_read,
+struct producer_ops const usart_producer_ops = {
+	/*
+	 * Nothing to do here, we either had enough space in the queue when
+	 * a character came in or we dropped it already.
+	 */
+	.read = NULL,
 };
 
-struct out_stream_ops const usart_out_stream_ops = {
-	.write = usart_write,
-	.flush = usart_flush,
+struct consumer_ops const usart_consumer_ops = {
+	.written = usart_written,
+	.flush   = usart_flush,
 };
 
 void usart_init(struct usart_config const *config)
 {
 	intptr_t base = config->hw->base;
-
-	queue_init(&config->tx);
-	queue_init(&config->rx);
 
 	/*
 	 * Enable clock to USART, this must be done first, before attempting
@@ -117,9 +107,9 @@ void usart_shutdown(struct usart_config const *config)
 	config->hw->ops->disable(config);
 }
 
-void usart_set_baud_f0_l(struct usart_config const *config)
+void usart_set_baud_f0_l(struct usart_config const *config, int frequency_hz)
 {
-	int      div  = DIV_ROUND_NEAREST(clock_get_freq(), config->baud);
+	int      div  = DIV_ROUND_NEAREST(frequency_hz, config->baud);
 	intptr_t base = config->hw->base;
 
 	if (div / 16 > 0) {
@@ -139,9 +129,9 @@ void usart_set_baud_f0_l(struct usart_config const *config)
 	}
 }
 
-void usart_set_baud_f(struct usart_config const *config)
+void usart_set_baud_f(struct usart_config const *config, int frequency_hz)
 {
-	int div = DIV_ROUND_NEAREST(clock_get_freq(), config->baud);
+	int div = DIV_ROUND_NEAREST(frequency_hz, config->baud);
 
 	/* STM32F only supports x16 oversampling */
 	STM32_USART_BRR(config->hw->base) = div;
@@ -152,10 +142,8 @@ static void usart_interrupt_tx(struct usart_config const *config)
 	intptr_t base = config->hw->base;
 	uint8_t  byte;
 
-	if (queue_remove_unit(&config->tx, &byte)) {
+	if (consumer_read_unit(&config->consumer, &byte)) {
 		STM32_USART_TDR(base) = byte;
-
-		out_stream_ready(&config->out);
 
 		/*
 		 * Make sure the TXE interrupt is enabled and that we won't go
@@ -180,19 +168,11 @@ static void usart_interrupt_tx(struct usart_config const *config)
 
 static void usart_interrupt_rx(struct usart_config const *config)
 {
-	intptr_t base    = config->hw->base;
-	uint8_t  byte    = STM32_USART_RDR(base);
-	uint32_t dropped = 1 - queue_add_unit(&config->rx, &byte);
+	intptr_t base = config->hw->base;
+	uint8_t  byte = STM32_USART_RDR(base);
 
-	atomic_add((uint32_t *) &config->state->rx_dropped, dropped);
-
-	/*
-	 * Wake up whoever is listening on the other end of the queue.  The
-	 * queue_add_units call above may have failed due to a full queue, but
-	 * it doesn't really matter to the ready callback because there will be
-	 * something in the queue to consume either way.
-	 */
-	in_stream_ready(&config->in);
+	if (!producer_write_unit(&config->producer, &byte))
+		atomic_add((uint32_t *) &config->state->rx_dropped, 1);
 }
 
 void usart_interrupt(struct usart_config const *config)

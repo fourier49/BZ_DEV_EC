@@ -5,10 +5,12 @@
 
 #include "adc.h"
 #include "charge_manager.h"
+#include "charge_ramp.h"
 #include "console.h"
 #include "gpio.h"
 #include "hooks.h"
 #include "host_command.h"
+#include "system.h"
 #include "timer.h"
 #include "usb_pd.h"
 #include "usb_pd_config.h"
@@ -25,6 +27,9 @@
 /* Keep track of available charge for each charge port. */
 static struct charge_port_info available_charge[CHARGE_SUPPLIER_COUNT]
 					       [PD_PORT_COUNT];
+
+/* Keep track of when the supplier on each port is registered. */
+static timestamp_t registration_time[PD_PORT_COUNT];
 
 /*
  * Charge ceiling for ports. This can be set to temporarily limit the charge
@@ -152,6 +157,13 @@ static void charge_manager_fill_power_info(int port,
 		r->meas.current_max = 0;
 		r->max_power = 0;
 	} else {
+#ifdef HAS_TASK_CHG_RAMP
+		/* Read ramped current if active charging port */
+		int use_ramp_current = (charge_port == port);
+#else
+		const int use_ramp_current = 0;
+#endif
+
 		switch (sup) {
 		case CHARGE_SUPPLIER_PD:
 			r->type = USB_CHG_TYPE_PD;
@@ -171,12 +183,23 @@ static void charge_manager_fill_power_info(int port,
 		case CHARGE_SUPPLIER_BC12_SDP:
 			r->type = USB_CHG_TYPE_BC12_SDP;
 			break;
+		case CHARGE_SUPPLIER_VBUS:
+			r->type = USB_CHG_TYPE_VBUS;
+			break;
 		default:
 			r->type = USB_CHG_TYPE_OTHER;
 		}
 		r->meas.voltage_max = available_charge[sup][port].voltage;
-		r->meas.current_max = available_charge[sup][port].current;
-		r->max_power = POWER(available_charge[sup][port]);
+
+		if (use_ramp_current) {
+			r->meas.current_max = chg_ramp_get_current_limit();
+			r->max_power =
+				r->meas.current_max * r->meas.voltage_max;
+		} else {
+			r->meas.current_max =
+				available_charge[sup][port].current;
+			r->max_power = POWER(available_charge[sup][port]);
+		}
 
 		/*
 		 * If we are sourcing power, or sinking but not charging, then
@@ -385,9 +408,16 @@ static void charge_manager_refresh(void)
 			available_charge[new_supplier][new_port].voltage;
 	}
 
-	/* Change the charge limit + charge port if modified. */
-	if (new_port != charge_port || new_charge_current != charge_current) {
+	/* Change the charge limit + charge port/supplier if modified. */
+	if (new_port != charge_port || new_charge_current != charge_current ||
+	    new_supplier != charge_supplier) {
+#ifdef HAS_TASK_CHG_RAMP
+		chg_ramp_charge_supplier_change(
+				new_port, new_supplier, new_charge_current,
+				registration_time[new_port]);
+#else
 		board_set_charge_limit(new_charge_current);
+#endif
 		CPRINTS("CL: p%d s%d i%d v%d", new_port, new_supplier,
 			new_charge_current, new_charge_voltage);
 	}
@@ -508,6 +538,7 @@ static void charge_manager_make_change(enum charge_manager_change_type change,
 	if (change == CHANGE_CHARGE) {
 		available_charge[supplier][port].current = charge->current;
 		available_charge[supplier][port].voltage = charge->voltage;
+		registration_time[port] = get_time();
 
 		/*
 		 * If we have a charge on our delayed override port within
@@ -556,6 +587,14 @@ void charge_manager_update_charge(int supplier,
 void charge_manager_update_dualrole(int port, enum dualrole_capabilities cap)
 {
 	ASSERT(port >= 0 && port < PD_PORT_COUNT);
+
+	/*
+	 * We have no way of determining the charger dualrole capability in
+	 * locked RO, so just assume we always have a dedicated charger.
+	 */
+	if (system_get_image_copy() == SYSTEM_IMAGE_RO && system_is_locked())
+		cap = CAP_DEDICATED;
+
 	/* Ignore when capability is unchanged */
 	if (cap != dualrole_capability[port]) {
 		dualrole_capability[port] = cap;

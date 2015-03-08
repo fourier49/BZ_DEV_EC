@@ -9,6 +9,7 @@
 #include "battery.h"
 #include "case_closed_debug.h"
 #include "charge_manager.h"
+#include "charge_ramp.h"
 #include "charge_state.h"
 #include "charger.h"
 #include "common.h"
@@ -28,10 +29,23 @@
 #include "usb_pd.h"
 #include "usb_pd_config.h"
 #include "usb-stm32f3.h"
+#include "usb-stream.h"
+#include "usart-stm32f3.h"
 #include "util.h"
 #include "pi3usb9281.h"
 
 #define CPRINTS(format, args...) cprints(CC_USBCHARGE, format, ## args)
+
+/* Default input current limit when VBUS is present */
+#define DEFAULT_CURR_LIMIT            500  /* mA */
+
+/* VBUS too low threshold */
+#define VBUS_LOW_THRESHOLD_MV 4600
+
+/* Input current error margin */
+#define IADP_ERROR_MARGIN_MA 100
+
+static int charge_current_limit;
 
 static void vbus_log(void)
 {
@@ -41,6 +55,19 @@ DECLARE_DEFERRED(vbus_log);
 
 void vbus_evt(enum gpio_signal signal)
 {
+	struct charge_port_info charge;
+	int vbus_level = gpio_get_level(signal);
+
+	/*
+	 * If VBUS is low, or VBUS is high and we are not outputting VBUS
+	 * ourselves, then update the VBUS supplier.
+	 */
+	if (!vbus_level || !gpio_get_level(GPIO_USBC_5V_EN)) {
+		charge.voltage = USB_BC12_CHARGE_VOLTAGE;
+		charge.current = vbus_level ? DEFAULT_CURR_LIMIT : 0;
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0, &charge);
+	}
+
 	hook_call_deferred(vbus_log, 0);
 	if (task_start_called())
 		task_wake(TASK_ID_PD);
@@ -151,30 +178,99 @@ void usb_evt(enum gpio_signal signal)
 #include "gpio_list.h"
 
 const void *const usb_strings[] = {
-	[USB_STR_DESC]         = usb_string_desc,
-	[USB_STR_VENDOR]       = USB_STRING_DESC("Google Inc."),
-	[USB_STR_PRODUCT]      = USB_STRING_DESC("Ryu debug"),
-	[USB_STR_VERSION]      = USB_STRING_DESC(CROS_EC_VERSION32),
-	[USB_STR_CONSOLE_NAME] = USB_STRING_DESC("EC_PD"),
+	[USB_STR_DESC]           = usb_string_desc,
+	[USB_STR_VENDOR]         = USB_STRING_DESC("Google Inc."),
+	[USB_STR_PRODUCT]        = USB_STRING_DESC("Ryu debug"),
+	[USB_STR_VERSION]        = USB_STRING_DESC(CROS_EC_VERSION32),
+	[USB_STR_CONSOLE_NAME]   = USB_STRING_DESC("EC_PD"),
+	[USB_STR_AP_STREAM_NAME] = USB_STRING_DESC("AP"),
+	[USB_STR_SH_STREAM_NAME] = USB_STRING_DESC("SH"),
 };
 
 BUILD_ASSERT(ARRAY_SIZE(usb_strings) == USB_STR_COUNT);
 
+/*
+ * Define AP and SH console forwarding queues and associated USART and USB
+ * stream endpoints.
+ */
+
+QUEUE_CONFIG(ap_usart_to_usb, 64, uint8_t);
+QUEUE_CONFIG(usb_to_ap_usart, 64, uint8_t);
+QUEUE_CONFIG(sh_usart_to_usb, 64, uint8_t);
+QUEUE_CONFIG(usb_to_sh_usart, 64, uint8_t);
+
+struct usb_stream_config const usb_ap_stream;
+struct usb_stream_config const usb_sh_stream;
+
+USART_CONFIG(usart1,
+	     usart1_hw,
+	     115200,
+	     ap_usart_to_usb,
+	     usb_to_ap_usart,
+	     usb_ap_stream.consumer,
+	     usb_ap_stream.producer)
+
+USART_CONFIG(usart3,
+	     usart3_hw,
+	     115200,
+	     sh_usart_to_usb,
+	     usb_to_sh_usart,
+	     usb_sh_stream.consumer,
+	     usb_sh_stream.producer)
+
+#define AP_USB_STREAM_RX_SIZE	16
+#define AP_USB_STREAM_TX_SIZE	16
+
+USB_STREAM_CONFIG(usb_ap_stream,
+		  USB_IFACE_AP_STREAM,
+		  USB_STR_AP_STREAM_NAME,
+		  USB_EP_AP_STREAM,
+		  AP_USB_STREAM_RX_SIZE,
+		  AP_USB_STREAM_TX_SIZE,
+		  usb_to_ap_usart,
+		  ap_usart_to_usb,
+		  usart1.consumer,
+		  usart1.producer)
+
+#define SH_USB_STREAM_RX_SIZE	16
+#define SH_USB_STREAM_TX_SIZE	16
+
+USB_STREAM_CONFIG(usb_sh_stream,
+		  USB_IFACE_SH_STREAM,
+		  USB_STR_SH_STREAM_NAME,
+		  USB_EP_SH_STREAM,
+		  SH_USB_STREAM_RX_SIZE,
+		  SH_USB_STREAM_TX_SIZE,
+		  usb_to_sh_usart,
+		  sh_usart_to_usb,
+		  usart3.consumer,
+		  usart3.producer)
+
 /* Initialize board. */
 static void board_init(void)
 {
-	struct charge_port_info charge;
+	struct charge_port_info charge_none, charge_vbus;
 
 	/* Initialize all pericom charge suppliers to 0 */
-	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
-	charge.current = 0;
+	charge_none.voltage = USB_BC12_CHARGE_VOLTAGE;
+	charge_none.current = 0;
 	charge_manager_update_charge(CHARGE_SUPPLIER_PROPRIETARY,
 				     0,
-				     &charge);
-	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_CDP, 0, &charge);
-	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_DCP, 0, &charge);
-	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_SDP, 0, &charge);
-	charge_manager_update_charge(CHARGE_SUPPLIER_OTHER, 0, &charge);
+				     &charge_none);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_CDP, 0, &charge_none);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_DCP, 0, &charge_none);
+	charge_manager_update_charge(CHARGE_SUPPLIER_BC12_SDP, 0, &charge_none);
+	charge_manager_update_charge(CHARGE_SUPPLIER_OTHER, 0, &charge_none);
+
+	/* Initialize VBUS supplier based on whether or not VBUS is present */
+	charge_vbus.voltage = USB_BC12_CHARGE_VOLTAGE;
+	charge_vbus.current = DEFAULT_CURR_LIMIT;
+	if (gpio_get_level(GPIO_CHGR_ACOK))
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0,
+					     &charge_vbus);
+	else
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0,
+					     &charge_none);
 
 	/* Enable pericom BC1.2 interrupts. */
 	gpio_enable_interrupt(GPIO_USBC_BC12_INT_L);
@@ -189,6 +285,16 @@ static void board_init(void)
 	    !gpio_get_level(GPIO_BTN_VOLD_L) &&
 	    !gpio_get_level(GPIO_BTN_VOLU_L))
 		host_set_single_event(EC_HOST_EVENT_KEYBOARD_RECOVERY);
+
+	/*
+	 * Initialize AP and SH console forwarding USARTs and queues.
+	 */
+	queue_init(&ap_usart_to_usb);
+	queue_init(&usb_to_ap_usart);
+	queue_init(&sh_usart_to_usb);
+	queue_init(&usb_to_sh_usart);
+	usart_init(&usart1);
+	usart_init(&usart3);
 
 	/*
 	 * Enable CC lines after all GPIO have been initialized. Note, it is
@@ -230,7 +336,8 @@ const int supplier_priority[] = {
 	[CHARGE_SUPPLIER_BC12_DCP] = 1,
 	[CHARGE_SUPPLIER_BC12_CDP] = 2,
 	[CHARGE_SUPPLIER_BC12_SDP] = 3,
-	[CHARGE_SUPPLIER_OTHER] = 3
+	[CHARGE_SUPPLIER_OTHER] = 3,
+	[CHARGE_SUPPLIER_VBUS] = 4
 };
 BUILD_ASSERT(ARRAY_SIZE(supplier_priority) == CHARGE_SUPPLIER_COUNT);
 
@@ -333,9 +440,10 @@ DECLARE_DEFERRED(board_charge_manager_override_timeout);
 int board_set_active_charge_port(int charge_port)
 {
 	int ret = EC_SUCCESS;
+	/* check if we are source vbus on that port */
+	int source = gpio_get_level(GPIO_USBC_5V_EN);
 
-	if (charge_port >= 0 && charge_port < PD_PORT_COUNT &&
-	    pd_get_role(charge_port) != PD_ROLE_SINK) {
+	if (charge_port >= 0 && charge_port < PD_PORT_COUNT && source) {
 		CPRINTS("Port %d is not a sink, skipping enable", charge_port);
 		charge_port = CHARGE_PORT_NONE;
 		ret = EC_ERROR_INVAL;
@@ -355,8 +463,56 @@ int board_set_active_charge_port(int charge_port)
  */
 void board_set_charge_limit(int charge_ma)
 {
-	int rv = charge_set_input_current_limit(MAX(charge_ma,
-					CONFIG_CHARGER_INPUT_CURRENT));
+	int rv;
+
+	charge_current_limit = MAX(charge_ma, CONFIG_CHARGER_INPUT_CURRENT);
+	rv = charge_set_input_current_limit(charge_current_limit);
 	if (rv < 0)
 		CPRINTS("Failed to set input current limit for PD");
+}
+
+/**
+ * Return whether ramping is allowed for given supplier
+ */
+int board_is_ramp_allowed(int supplier)
+{
+	return supplier == CHARGE_SUPPLIER_BC12_DCP ||
+	       supplier == CHARGE_SUPPLIER_BC12_SDP ||
+	       supplier == CHARGE_SUPPLIER_BC12_CDP ||
+	       supplier == CHARGE_SUPPLIER_PROPRIETARY;
+}
+
+/**
+ * Return the maximum allowed input current
+ */
+int board_get_ramp_current_limit(int supplier, int sup_curr)
+{
+	switch (supplier) {
+	case CHARGE_SUPPLIER_BC12_DCP:
+		return 2000;
+	case CHARGE_SUPPLIER_BC12_SDP:
+		return 1000;
+	case CHARGE_SUPPLIER_BC12_CDP:
+	case CHARGE_SUPPLIER_PROPRIETARY:
+		return sup_curr;
+	default:
+		return 500;
+	}
+}
+
+/**
+ * Return if board is consuming full amount of input current
+ */
+int board_is_consuming_full_charge(void)
+{
+	return adc_read_channel(ADC_IADP) >= charge_current_limit -
+					     IADP_ERROR_MARGIN_MA;
+}
+
+/**
+ * Return if VBUS is sagging low enough that we should stop ramping
+ */
+int board_is_vbus_too_low(enum chg_ramp_vbus_state ramp_state)
+{
+	return adc_read_channel(ADC_VBUS) < VBUS_LOW_THRESHOLD_MV;
 }

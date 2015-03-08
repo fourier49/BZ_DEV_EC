@@ -19,14 +19,19 @@
 #define CONFIG_ADC
 #define CONFIG_BOARD_PRE_INIT
 #define CONFIG_CHARGE_MANAGER
-#undef CONFIG_CMD_HASH
-#undef CONFIG_CMD_TYPEC
+#define CONFIG_CHARGE_RAMP
+#undef  CONFIG_CMD_HASH
+#undef  CONFIG_CMD_TYPEC
+#undef  CONFIG_CMD_I2C_SCAN
+#undef  CONFIG_CMD_I2C_XFER
 /* Minimum ilim = 500 mA */
 #define CONFIG_CHARGER_INPUT_CURRENT PWM_0_MA
+#undef  CONFIG_CMD_IDLE_STATS
+#undef  CONFIG_CMD_SHMEM
 #define CONFIG_COMMON_GPIO_SHORTNAMES
 #undef  CONFIG_CONSOLE_CMDHELP
 #undef  CONFIG_CONSOLE_HISTORY
-#undef CONFIG_DEBUG_ASSERT
+#undef  CONFIG_DEBUG_ASSERT
 #define CONFIG_FORCE_CONSOLE_RESUME
 #define CONFIG_HIBERNATE_WAKEUP_PINS (STM32_PWR_CSR_EWUP3|STM32_PWR_CSR_EWUP8)
 #undef  CONFIG_HOSTCMD_EVENTS
@@ -105,6 +110,7 @@ enum charge_supplier {
 	CHARGE_SUPPLIER_BC12_SDP,
 	CHARGE_SUPPLIER_PROPRIETARY,
 	CHARGE_SUPPLIER_OTHER,
+	CHARGE_SUPPLIER_VBUS,
 	CHARGE_SUPPLIER_COUNT
 };
 
@@ -117,9 +123,6 @@ extern const int supplier_priority[];
 
 /* Map current in milli-amps to PWM duty cycle percentage */
 #define MA_TO_PWM(curr) (((curr) - PWM_0_MA) * 100 / (PWM_100_MA - PWM_0_MA))
-
-/* Called when we receive battery level info from the EC. */
-void board_update_battery_soc(int soc);
 
 /* Get the last received battery level. */
 int board_get_battery_soc(void);

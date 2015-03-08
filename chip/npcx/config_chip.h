@@ -8,7 +8,6 @@
 
 /* CPU core BFD configuration */
 #include "core/cortex-m/config_core.h"
-#define CONFIG_PSTATE_AT_END
 
 /* 32k hz internal oscillator frequency (FRCLK) */
 #define INT_32K_CLOCK 32768
@@ -54,14 +53,19 @@
 /* Default task stack size */
 #define TASK_STACK_SIZE         512
 
-/* SPI Flash Spec of W25Q20CV */
+/* Address of RAM log used by Booter */
+#define ADDR_BOOT_RAMLOG        0x100C7FC0
 
+/* SPI Flash Spec of W25Q20CV */
 #define CONFIG_FLASH_BANK_SIZE	0x00001000  /* protect bank size 4K bytes */
 #define CONFIG_FLASH_ERASE_SIZE	0x00001000  /* sector erase size 4K bytes */
 #define CONFIG_FLASH_WRITE_SIZE	0x00000001  /* minimum write size */
 
 #define CONFIG_FLASH_WRITE_IDEAL_SIZE 256	 /* one page size for write */
 #define CONFIG_FLASH_PHYSICAL_SIZE    0x00040000 /* 256KB Flash used for EC */
+
+/* No PSTATE; uses a real SPI flash */
+#undef CONFIG_FLASH_PSTATE
 
 /****************************************************************************/
 /* Define our flash layout. */
@@ -72,30 +76,10 @@
 
 /* RO firmware offset of flash */
 #define CONFIG_FW_RO_OFF	0
-
-/*
- * The EC uses the one bank of flash to emulate a SPI-like write protect
- * register with persistent state.
- */
-#define CONFIG_FW_PSTATE_SIZE   CONFIG_FLASH_BANK_SIZE
-
-#ifdef CONFIG_PSTATE_AT_END
-/* PSTATE is at end of flash */
 #define CONFIG_FW_RO_SIZE       CONFIG_FW_IMAGE_SIZE
-#define CONFIG_FW_PSTATE_OFF    (CONFIG_FLASH_PHYSICAL_SIZE \
-				- CONFIG_FW_PSTATE_SIZE)
-/* Don't claim PSTATE is part of flash */
-#define CONFIG_FLASH_SIZE       CONFIG_FW_PSTATE_OFF
-
-#else
-/* PSTATE immediately follows RO, in the first half of flash */
-#define CONFIG_FW_RO_SIZE       (CONFIG_FW_IMAGE_SIZE \
-				- CONFIG_FW_PSTATE_SIZE)
-#define CONFIG_FW_PSTATE_OFF    CONFIG_FW_RO_SIZE
 #define CONFIG_FLASH_SIZE       CONFIG_FLASH_PHYSICAL_SIZE
-#endif
 
-/* Either way, RW firmware is one firmware image offset from the start */
+/* RW firmware is one firmware image offset from the start */
 #define CONFIG_FW_RW_OFF        CONFIG_FW_IMAGE_SIZE
 #define CONFIG_FW_RW_SIZE       CONFIG_FW_IMAGE_SIZE
 
@@ -110,17 +94,6 @@
 #define CONFIG_LFW_OFFSET       0x1000
 
 /****************************************************************************/
-/* Lock the boot configuration to prevent brickage. */
-
-/*
- * No GPIO trigger for ROM bootloader.
- * Keep JTAG debugging enabled.
- * Use 0xA442 flash write key.
- * Lock it this way.
- */
-#define CONFIG_BOOTCFG_VALUE 0x7ffffffe
-
-/****************************************************************************/
 /* Customize the build */
 
 /* Optional features present on this chip */
@@ -132,7 +105,6 @@
 #define CONFIG_SWITCH
 #define CONFIG_MPU
 #define CONFIG_SPI
-
 
 /* Compile for running from RAM instead of flash */
 /* #define COMPILE_FOR_RAM */

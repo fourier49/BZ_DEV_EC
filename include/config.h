@@ -51,6 +51,9 @@
  */
 #undef CONFIG_ADC_CLOCK
 
+/* ADC sample time selection. The value is chip-dependent. */
+#undef CONFIG_ADC_SAMPLE_TIME
+
 /*
  * Some ALS modules may be connected to the EC. We need the command, and
  * specific drivers for each module.
@@ -215,6 +218,14 @@
 #undef CONFIG_CAPSENSE
 
 /*****************************************************************************/
+
+/* Compile charge manager */
+#undef CONFIG_CHARGE_MANAGER
+
+/* Compile input current ramping support */
+#undef CONFIG_CHARGE_RAMP
+
+/*****************************************************************************/
 /* Charger config */
 
 /* Compile common charge state code. You must pick an implementation. */
@@ -335,6 +346,7 @@
 #undef CONFIG_CMD_ACCELS
 #undef CONFIG_CMD_ACCEL_INFO
 #undef CONFIG_CMD_BATDEBUG
+#undef CONFIG_CMD_CHGRAMP
 #undef CONFIG_CMD_CLOCKGATES
 #undef CONFIG_CMD_COMXTEST
 #undef CONFIG_CMD_ECTEMP
@@ -343,6 +355,9 @@
 #undef CONFIG_CMD_GSV
 #define CONFIG_CMD_HASH
 #undef CONFIG_CMD_HOSTCMD
+#define CONFIG_CMD_I2C_SCAN
+#define CONFIG_CMD_I2C_XFER
+#define CONFIG_CMD_IDLE_STATS
 #undef CONFIG_CMD_ILIM
 #undef CONFIG_CMD_JUMPTAGS
 #define CONFIG_CMD_PD
@@ -355,6 +370,7 @@
 #undef CONFIG_CMD_POWERLED
 #undef CONFIG_CMD_RTC_ALARM
 #undef CONFIG_CMD_SCRATCHPAD
+#define CONFIG_CMD_SHMEM
 #undef CONFIG_CMD_SLEEP
 #undef CONFIG_CMD_SPI_FLASH
 #undef CONFIG_CMD_STACKOVERFLOW
@@ -366,6 +382,12 @@
 
 /* Provide common core code to output panic information without interrupts. */
 #define CONFIG_COMMON_PANIC_OUTPUT
+
+/*
+ * Store a panic log and halt the system for a software-related reasons, such as
+ * stack overflow or assertion failure.
+ */
+#undef CONFIG_SOFTWARE_PANIC
 
 /*
  * Provide the default GPIO abstraction layer.
@@ -540,6 +562,13 @@
  */
 #undef CONFIG_FAN_RPM_CUSTOM
 
+/*
+ * We normally check and update the fans once per second (HOOK_SECOND). If this
+ * is #defined to a postive integer N, we will only update the fans every N
+ * seconds instead.
+ */
+#undef CONFIG_FAN_UPDATE_PERIOD
+
 /*****************************************************************************/
 /* Flash configuration */
 
@@ -559,6 +588,15 @@
 
 #undef CONFIG_FLASH_PHYSICAL_SIZE
 #undef CONFIG_FLASH_PROTECT_NEXT_BOOT
+
+/*
+ * Use a bank of flash to store its persistent write protect state.  This
+ * allows ECs with internal flash to emulate something closer to a SPI flash
+ * write protect register.  If this is not defined, write protect state is
+ * maintained solely by the physical flash driver.
+ */
+#define CONFIG_FLASH_PSTATE
+
 #undef CONFIG_FLASH_SIZE
 #undef CONFIG_FLASH_WRITE_IDEAL_SIZE
 #undef CONFIG_FLASH_WRITE_SIZE
@@ -635,17 +673,6 @@
 /*****************************************************************************/
 
 /*
- * Use a larger word (32 bits) to store the pin muxing configuration
- * (aka alternate function).
- *
- * Less optimal for storage size and alignment, but might be required for
- * platforms with very flexible pin muxing.
- */
-#undef CONFIG_GPIO_LARGE_ALT_INFO
-
-/*****************************************************************************/
-
-/*
  * Support the host asking the EC about the status of the most recent host
  * command.
  *
@@ -683,6 +710,9 @@
 #define CONFIG_HOSTCMD_RATE_LIMITING_PERIOD   (500 * MSEC)
 #define CONFIG_HOSTCMD_RATE_LIMITING_MIN_REST (3   * MSEC)
 #define CONFIG_HOSTCMD_RATE_LIMITING_RECESS   (20  * MSEC)
+
+/* Panic when status of PD MCU reflects that it has crashed */
+#undef CONFIG_HOSTCMD_PD_PANIC
 
 /*****************************************************************************/
 
@@ -852,6 +882,12 @@
 #undef CONFIG_LIGHTBAR_POWER_RAILS
 
 /*
+ * For tap sequence, show the last segment in dim to give a better idea of
+ * battery percentage.
+ */
+#undef CONFIG_LIGHTBAR_TAP_DIM_LAST_SEGMENT
+
+/*
  * Low power idle options. These are disabled by default and all boards that
  * want to use low power idle must define it. When using the LFIOSC, the low
  * frequency clock will be used to conserve even more power when possible.
@@ -940,14 +976,6 @@
 
 /* Compile common code for AP power state machine */
 #undef CONFIG_POWER_COMMON
-
-/*
- * The EC stores persistent state information for flash write protect in a
- * block of flash.  If this option is defined, the information is in the last
- * bank of flash, instead of the last bank in the nominally read-only section
- * of flash.
- */
-#undef CONFIG_PSTATE_AT_END
 
 /* Use part of the EC's data EEPROM to hold persistent storage for the AP. */
 #undef CONFIG_PSTORE
@@ -1126,6 +1154,9 @@
 
 /* UART index (number) for host UART, if present */
 #undef CONFIG_UART_HOST
+
+/* Use uart_input_filter() to filter UART input. See prototype in uart.h */
+#undef CONFIG_UART_INPUT_FILTER
 
 /*
  * UART receive buffer size in bytes.  Must be a power of 2 for macros in

@@ -53,12 +53,14 @@
 #define CONFIG_CHARGER_DISCHARGE_ON_AC
 #define CONFIG_CHARGER_MIN_BAT_PCT_FOR_POWER_ON 1
 #define CONFIG_FANS 2
+#define CONFIG_FAN_UPDATE_PERIOD 10
 #define CONFIG_GESTURE_DETECTION
 #define CONFIG_GESTURE_SAMPLING_INTERVAL_MS 5
 #undef  CONFIG_HIBERNATE_DELAY_SEC
 #define CONFIG_HIBERNATE_DELAY_SEC (3600 * 24 * 7)
 #define CONFIG_HIBERNATE_BATT_PCT 10
 #define CONFIG_HIBERNATE_BATT_SEC (3600 * 24)
+#define CONFIG_HOSTCMD_PD_PANIC
 #define CONFIG_PECI_TJMAX 105
 #define CONFIG_PWM
 #define CONFIG_PWM_KBLIGHT
@@ -67,6 +69,7 @@
 #define CONFIG_TEMP_SENSOR_POWER_GPIO GPIO_PP3300_DSW_GATED_EN
 #define CONFIG_UART_HOST 2
 #define CONFIG_USB_PORT_POWER_SMART
+#define CONFIG_USB_PORT_POWER_SMART_DEFAULT_MODE USB_CHARGE_MODE_CDP
 #define CONFIG_USB_PORT_POWER_SMART_INVERTED
 #define CONFIG_VBOOT_HASH
 #define CONFIG_WIRELESS
@@ -174,6 +177,7 @@ enum als_id {
 
 /* Discharge battery when on AC power for factory test. */
 int board_discharge_on_ac(int enable);
+int board_is_discharging_on_ac(void);
 
 /* Backboost detected interrupt */
 void bkboost_det_interrupt(enum gpio_signal signal);

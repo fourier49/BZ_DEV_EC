@@ -8,6 +8,7 @@
 #include "adc_chip.h"
 #include "battery.h"
 #include "charge_manager.h"
+#include "charge_ramp.h"
 #include "common.h"
 #include "console.h"
 #include "gpio.h"
@@ -32,6 +33,18 @@
 /* Amount to offset the input current limit when sending to EC */
 #define INPUT_CURRENT_LIMIT_OFFSET_MA 192
 
+/* Default input current limit when VBUS is present */
+#define DEFAULT_CURR_LIMIT            500  /* mA */
+
+/*
+ * When battery is high, system may not be pulling full current. Also, when
+ * high AND input voltage is below boost bypass, then limit input current
+ * limit to HIGH_BATT_LIMIT_CURR_MA to reduce audible ringing.
+ */
+#define HIGH_BATT_THRESHOLD 90
+#define HIGH_BATT_LIMIT_BOOST_BYPASS_MV 11000
+#define HIGH_BATT_LIMIT_CURR_MA 2000
+
 /* Chipset power state */
 static enum power_state ps;
 
@@ -39,11 +52,18 @@ static enum power_state ps;
 static int batt_soc;
 
 /* Default to 5V charging allowed for dead battery case */
-enum pd_charge_state charge_state = PD_CHARGE_5V;
+static enum pd_charge_state charge_state = PD_CHARGE_5V;
 
-/* PD MCU status and host event status for host command */
-static struct ec_response_pd_status pd_status;
-static struct ec_response_host_event_status host_event_status;
+/*
+ * PD MCU status and host event status for host command
+ * Note: these vars must be aligned on 4-byte boundary because we pass the
+ * address to atomic_ functions which use assembly to access them.
+ */
+static struct ec_response_pd_status pd_status __aligned(4);
+static struct ec_response_host_event_status host_event_status __aligned(4);
+
+/* Desired input current limit */
+static int desired_charge_rate_ma = -1;
 
 /*
  * Store the state of our USB data switches so that they can be restored
@@ -66,7 +86,8 @@ const int supplier_priority[] = {
 	[CHARGE_SUPPLIER_BC12_DCP] = 1,
 	[CHARGE_SUPPLIER_BC12_CDP] = 2,
 	[CHARGE_SUPPLIER_BC12_SDP] = 3,
-	[CHARGE_SUPPLIER_OTHER] = 3
+	[CHARGE_SUPPLIER_OTHER] = 3,
+	[CHARGE_SUPPLIER_VBUS] = 4
 };
 BUILD_ASSERT(ARRAY_SIZE(supplier_priority) == CHARGE_SUPPLIER_COUNT);
 
@@ -86,6 +107,19 @@ DECLARE_DEFERRED(pericom_port1_reenable_interrupts);
 
 void vbus0_evt(enum gpio_signal signal)
 {
+	struct charge_port_info charge;
+	int vbus_level = gpio_get_level(signal);
+
+	/*
+	 * If VBUS is low, or VBUS is high and we are not outputting VBUS
+	 * ourselves, then update the VBUS supplier.
+	 */
+	if (!vbus_level || !gpio_get_level(GPIO_USB_C0_5V_EN)) {
+		charge.voltage = USB_BC12_CHARGE_VOLTAGE;
+		charge.current = vbus_level ? DEFAULT_CURR_LIMIT : 0;
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0, &charge);
+	}
+
 	/*
 	 * Re-enable interrupts on pericom charger detector since the
 	 * chip may periodically reset itself, and come back up with
@@ -99,6 +133,19 @@ void vbus0_evt(enum gpio_signal signal)
 
 void vbus1_evt(enum gpio_signal signal)
 {
+	struct charge_port_info charge;
+	int vbus_level = gpio_get_level(signal);
+
+	/*
+	 * If VBUS is low, or VBUS is high and we are not outputting VBUS
+	 * ourselves, then update the VBUS supplier.
+	 */
+	if (!vbus_level || !gpio_get_level(GPIO_USB_C1_5V_EN)) {
+		charge.voltage = USB_BC12_CHARGE_VOLTAGE;
+		charge.current = vbus_level ? DEFAULT_CURR_LIMIT : 0;
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 1, &charge);
+	}
+
 	/*
 	 * Re-enable interrupts on pericom charger detector since the
 	 * chip may periodically reset itself, and come back up with
@@ -126,28 +173,27 @@ void set_usb_switches(int port, int open)
  */
 #define USB_CHG_RESET_DELAY_MS 100
 
-/* Automatically do one redetection after a timeout period, for SDP ports. */
-#define USB_CHG_AUTO_REDETECT_TIMEOUT (30 * SECOND)
-
 void usb_charger_task(void)
 {
 	int port = (task_get_current() == TASK_ID_USB_CHG_P0 ? 0 : 1);
+	int vbus_source = (port == 0 ? GPIO_USB_C0_5V_EN : GPIO_USB_C1_5V_EN);
 	int device_type, charger_status;
 	struct charge_port_info charge;
-	int type, redetect_timeout;
-	uint32_t wake_event = 0;
+	int type;
 	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
 
 	while (1) {
-		/* By default, don't do automatic redetection */
-		redetect_timeout = -1;
-
 		/* Read interrupt register to clear on chip */
 		pi3usb9281_get_interrupts(port);
 
-		/* Set device type */
-		device_type = pi3usb9281_get_device_type(port);
-		charger_status = pi3usb9281_get_charger_status(port);
+		if (gpio_get_level(vbus_source)) {
+			/* If we're sourcing VBUS then we're not charging */
+			device_type = charger_status = 0;
+		} else {
+			/* Set device type */
+			device_type = pi3usb9281_get_device_type(port);
+			charger_status = pi3usb9281_get_charger_status(port);
+		}
 
 		/* Debounce pin plug order if we detect a charger */
 		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
@@ -189,29 +235,19 @@ void usb_charger_task(void)
 			charger_status = pi3usb9281_get_charger_status(port);
 		}
 
-		if (PI3USB9281_CHG_STATUS_ANY(charger_status))
-			type = CHARGE_SUPPLIER_PROPRIETARY;
-		else if (device_type & PI3USB9281_TYPE_CDP)
-			type = CHARGE_SUPPLIER_BC12_CDP;
-		else if (device_type & PI3USB9281_TYPE_DCP)
-			type = CHARGE_SUPPLIER_BC12_DCP;
-		else if (device_type & PI3USB9281_TYPE_SDP) {
-			/*
-			 * Automatically do one redetection after a timeout
-			 * period when an SDP port is identified, since
-			 * pin contact order may have caused
-			 * misidentification.
-			 */
-			if (wake_event != TASK_EVENT_TIMER)
-				redetect_timeout =
-					USB_CHG_AUTO_REDETECT_TIMEOUT;
-			type = CHARGE_SUPPLIER_BC12_SDP;
-		}
-		else
-			type = CHARGE_SUPPLIER_OTHER;
-
 		/* Attachment: decode + update available charge */
 		if (device_type || PI3USB9281_CHG_STATUS_ANY(charger_status)) {
+			if (PI3USB9281_CHG_STATUS_ANY(charger_status))
+				type = CHARGE_SUPPLIER_PROPRIETARY;
+			else if (device_type & PI3USB9281_TYPE_CDP)
+				type = CHARGE_SUPPLIER_BC12_CDP;
+			else if (device_type & PI3USB9281_TYPE_DCP)
+				type = CHARGE_SUPPLIER_BC12_DCP;
+			else if (device_type & PI3USB9281_TYPE_SDP)
+				type = CHARGE_SUPPLIER_BC12_SDP;
+			else
+				type = CHARGE_SUPPLIER_OTHER;
+
 			charge.current = pi3usb9281_get_ilim(device_type,
 							     charger_status);
 			charge_manager_update_charge(type, port, &charge);
@@ -243,7 +279,7 @@ void usb_charger_task(void)
 		pd_send_host_event(PD_EVENT_POWER_CHANGE);
 
 		/* Wait for interrupt */
-		wake_event = task_wait_event(redetect_timeout);
+		task_wait_event(-1);
 	}
 }
 
@@ -359,7 +395,7 @@ static void board_init(void)
 	int pd_enable, i;
 	int slp_s5 = gpio_get_level(GPIO_PCH_SLP_S5_L);
 	int slp_s3 = gpio_get_level(GPIO_PCH_SLP_S3_L);
-	struct charge_port_info charge;
+	struct charge_port_info charge_none, charge_vbus;
 
 	/*
 	 * Enable CC lines after all GPIO have been initialized. Note, it is
@@ -373,25 +409,42 @@ static void board_init(void)
 	gpio_enable_interrupt(GPIO_USB_C1_VBUS_WAKE);
 
 	/* Initialize all pericom charge suppliers to 0 */
-	charge.voltage = USB_BC12_CHARGE_VOLTAGE;
-	charge.current = 0;
+	charge_none.voltage = USB_BC12_CHARGE_VOLTAGE;
+	charge_none.current = 0;
 	for (i = 0; i < PD_PORT_COUNT; i++) {
 		charge_manager_update_charge(CHARGE_SUPPLIER_PROPRIETARY,
 					     i,
-					     &charge);
+					     &charge_none);
 		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_CDP,
 					     i,
-					     &charge);
+					     &charge_none);
 		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_DCP,
 					     i,
-					     &charge);
+					     &charge_none);
 		charge_manager_update_charge(CHARGE_SUPPLIER_BC12_SDP,
 					     i,
-					     &charge);
+					     &charge_none);
 		charge_manager_update_charge(CHARGE_SUPPLIER_OTHER,
 					     i,
-					     &charge);
+					     &charge_none);
 	}
+
+	/* Initialize VBUS supplier based on whether or not VBUS is present */
+	charge_vbus.voltage = USB_BC12_CHARGE_VOLTAGE;
+	charge_vbus.current = DEFAULT_CURR_LIMIT;
+	if (gpio_get_level(GPIO_USB_C0_VBUS_WAKE))
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0,
+					     &charge_vbus);
+	else
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0,
+					     &charge_none);
+
+	if (gpio_get_level(GPIO_USB_C1_VBUS_WAKE))
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 1,
+					     &charge_vbus);
+	else
+		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 1,
+					     &charge_none);
 
 	/* Enable pericom BC1.2 interrupts. */
 	gpio_enable_interrupt(GPIO_USB_C0_BC12_INT_L);
@@ -422,6 +475,12 @@ static void board_init(void)
 
 	/* Initialize active charge port to none */
 	pd_status.active_charge_port = CHARGE_PORT_NONE;
+
+	/* Set PD MCU system status bits */
+	if (system_jumped_to_this_image())
+		pd_status.status |= PD_STATUS_JUMPED_TO_IMAGE;
+	if (system_get_image_copy() == SYSTEM_IMAGE_RW)
+		pd_status.status |= PD_STATUS_IN_RW;
 
 	/*
 	 * Do not enable PD communication in RO as a security measure.
@@ -578,10 +637,6 @@ void board_flip_usb_mux(int port)
 	gpio_set_level(usb_mux->ss2_dp_mode, usb_polarity);
 }
 
-void board_update_battery_soc(int soc)
-{
-	batt_soc = soc;
-}
 
 int board_get_battery_soc(void)
 {
@@ -621,8 +676,11 @@ int board_set_active_charge_port(int charge_port)
 {
 	/* charge port is a realy physical port */
 	int is_real_port = (charge_port >= 0 && charge_port < PD_PORT_COUNT);
+	/* check if we are source vbus on that port */
+	int source = gpio_get_level(charge_port == 0 ? GPIO_USB_C0_5V_EN :
+						       GPIO_USB_C1_5V_EN);
 
-	if (is_real_port && pd_get_role(charge_port) != PD_ROLE_SINK) {
+	if (is_real_port && source) {
 		CPRINTS("Skip enable p%d", charge_port);
 		return EC_ERROR_INVAL;
 	}
@@ -663,12 +721,114 @@ int pd_is_max_request_allowed(void)
 }
 
 /**
- * Set the charge limit based upon desired maximum.
- *
- * @param charge_ma     Desired charge limit (mA).
+ * Return whether ramping is allowed for given supplier
  */
-void board_set_charge_limit(int charge_ma)
+int board_is_ramp_allowed(int supplier)
 {
+	/* Don't allow ramping in RO when write protected */
+	if (system_get_image_copy() != SYSTEM_IMAGE_RW
+	    && system_is_locked())
+		return 0;
+	else
+		return supplier == CHARGE_SUPPLIER_BC12_DCP ||
+		       supplier == CHARGE_SUPPLIER_BC12_SDP ||
+		       supplier == CHARGE_SUPPLIER_BC12_CDP ||
+		       supplier == CHARGE_SUPPLIER_PROPRIETARY;
+}
+
+/**
+ * Return the maximum allowed input current
+ */
+int board_get_ramp_current_limit(int supplier, int sup_curr)
+{
+	switch (supplier) {
+	case CHARGE_SUPPLIER_BC12_DCP:
+		return 2000;
+	case CHARGE_SUPPLIER_BC12_SDP:
+		return 1000;
+	case CHARGE_SUPPLIER_BC12_CDP:
+	case CHARGE_SUPPLIER_PROPRIETARY:
+		return sup_curr;
+	default:
+		return 500;
+	}
+}
+
+/**
+ * Return if board is consuming full amount of input current
+ */
+int board_is_consuming_full_charge(void)
+{
+	return batt_soc >= 1 && batt_soc < HIGH_BATT_THRESHOLD;
+}
+
+/*
+ * Number of VBUS samples to average when computing if VBUS is too low
+ * for the ramp stable state.
+ */
+#define VBUS_STABLE_SAMPLE_COUNT 4
+
+/* VBUS too low threshold */
+#define VBUS_LOW_THRESHOLD_MV    4600
+
+/**
+ * Return if VBUS is sagging too low
+ */
+int board_is_vbus_too_low(enum chg_ramp_vbus_state ramp_state)
+{
+	static int vbus[VBUS_STABLE_SAMPLE_COUNT];
+	static int vbus_idx, vbus_samples_full;
+	int vbus_sum, i;
+
+	/*
+	 * If we are not allowing charging, it's because the EC saw
+	 * ACOK go low, so we know VBUS is drooping too far.
+	 */
+	if (charge_state == PD_CHARGE_NONE)
+		return 1;
+
+	/* If we are ramping, only look at one reading */
+	if (ramp_state == CHG_RAMP_VBUS_RAMPING) {
+		/* Reset the VBUS array vars used for the stable state */
+		vbus_idx = vbus_samples_full = 0;
+		return adc_read_channel(ADC_VBUS) < VBUS_LOW_THRESHOLD_MV;
+	}
+
+	/* Fill VBUS array with ADC readings */
+	vbus[vbus_idx] = adc_read_channel(ADC_VBUS);
+	vbus_idx = (vbus_idx == VBUS_STABLE_SAMPLE_COUNT-1) ? 0 : vbus_idx + 1;
+	if (vbus_idx == 0)
+		vbus_samples_full = 1;
+
+	/* If VBUS array is not full yet, then return ok */
+	if (!vbus_samples_full)
+		return 0;
+
+	/* All VBUS samples are populated, take average */
+	vbus_sum = 0;
+	for (i = 0; i < VBUS_STABLE_SAMPLE_COUNT; i++)
+		vbus_sum += vbus[i];
+
+	/* Return if average is lower than threshold */
+	return vbus_sum < (VBUS_STABLE_SAMPLE_COUNT * VBUS_LOW_THRESHOLD_MV);
+}
+
+static int board_update_charge_limit(int charge_ma)
+{
+	static int actual_charge_rate_ma = -1;
+
+	desired_charge_rate_ma = charge_ma;
+
+	if (batt_soc >= HIGH_BATT_THRESHOLD &&
+	    adc_read_channel(ADC_VBUS) < HIGH_BATT_LIMIT_BOOST_BYPASS_MV)
+		charge_ma = MIN(charge_ma, HIGH_BATT_LIMIT_CURR_MA);
+
+	/* if current hasn't changed, don't do anything */
+	if (charge_ma == actual_charge_rate_ma)
+		return 0;
+
+	actual_charge_rate_ma = charge_ma;
+
 #ifdef CONFIG_PWM
 	int pwm_duty = MA_TO_PWM(charge_ma);
 	if (pwm_duty < 0)
@@ -681,9 +841,27 @@ void board_set_charge_limit(int charge_ma)
 
 	pd_status.curr_lim_ma = MAX(0, charge_ma -
 					INPUT_CURRENT_LIMIT_OFFSET_MA);
-	pd_send_ec_int();
 
 	CPRINTS("New ilim %d", charge_ma);
+	return 1;
+}
+
+/**
+ * Set the charge limit based upon desired maximum.
+ *
+ * @param charge_ma     Desired charge limit (mA).
+ */
+void board_set_charge_limit(int charge_ma)
+{
+	/* Update current limit and notify EC if it changed */
+	if (board_update_charge_limit(charge_ma))
+		pd_send_ec_int();
+}
+
+static void board_update_battery_soc(int soc)
+{
+	batt_soc = soc;
+	board_update_charge_limit(desired_charge_rate_ma);
 }
 
 /* Send host event up to AP */
@@ -755,6 +933,11 @@ static int ec_status_host_cmd(struct host_cmd_handler_args *args)
 				gpio_set_level(GPIO_USB_C1_CHARGE_EN_L, 1);
 				pd_set_new_power_request(
 					pd_status.active_charge_port);
+				/*
+				 * Wake charge ramp task so that it will check
+				 * board_is_vbus_too_low() and stop ramping up.
+				 */
+				task_wake(TASK_ID_CHG_RAMP);
 				CPRINTS("Chg: None");
 				break;
 			case PD_CHARGE_5V:

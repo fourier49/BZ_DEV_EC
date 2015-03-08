@@ -20,7 +20,6 @@ test-list-$(BOARD_SAMUS)=
 
 # Ryu has issues when building tests
 test-list-$(BOARD_RYU)=
-test-list-$(BOARD_RYU_P1)=
 
 # llama has issues when building tests
 test-list-$(BOARD_LLAMA)=
@@ -36,6 +35,7 @@ test-list-host+=sbs_charging adapter host_command thermal_falco led_spring
 test-list-host+=bklight_lid bklight_passthru interrupt timer_dos button
 test-list-host+=motion_lid math_util sbs_charging_v2 battery_get_params_smart
 test-list-host+=lightbar inductive_charging usb_pd fan charge_manager
+test-list-host+=charge_ramp
 
 adapter-y=adapter.o
 battery_get_params_smart-y=battery_get_params_smart.o
@@ -43,6 +43,7 @@ bklight_lid-y=bklight_lid.o
 bklight_passthru-y=bklight_passthru.o
 button-y=button.o
 charge_manager-y=charge_manager.o
+charge_ramp-y+=charge_ramp.o
 console_edit-y=console_edit.o
 extpwr_gpio-y=extpwr_gpio.o
 flash-y=flash.o
