@@ -39,13 +39,13 @@ GPIO(USB_P0_DP_HPD,          A, 3,  GPIO_INT_BOTH, hpd_event)
 #endif
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW,  NULL)
+GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW,  NULL)   /* active HIGH */
 GPIO(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
 
 /* UFP Power Provider */    
-GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_HIGH, NULL)
-GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH, NULL)
-GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)
+GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
+GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
+GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Consumer */
 
 //-------------------------------------------------------------------------------------
 // CC Port 1
