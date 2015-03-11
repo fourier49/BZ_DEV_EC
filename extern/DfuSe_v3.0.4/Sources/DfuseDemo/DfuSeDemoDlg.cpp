@@ -749,7 +749,13 @@ void CDfuSeDemoDlg::OnSelchangeCombodevices()
 				BYTE WRP10  = 0x00;
 				BYTE WRP11  = 0x00;
 				DWORD WPR  = 0x00;
-                 
+
+				DFUSTATUS DFUStatus1;
+				for (int k = 0; k < 100; k++)
+				{
+					Sleep(10);
+					STDFU_Getstatus(&hDle, &DFUStatus1);
+				}
 
 				if(SupportROP)
 				{

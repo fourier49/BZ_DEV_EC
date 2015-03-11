@@ -43,7 +43,7 @@ uint32_t JumpAddress;
 	1 = enter app mode
 	2 = enter dfu mode
 */
-extern volatile int check_app;
+extern volatile int get_status_req;
 
 /* Private function prototypes -----------------------------------------------*/
 #ifdef __GNUC__
@@ -170,11 +170,11 @@ int main(void)
     int j;
     // sleep 1ms
 	for (j=0; j<100; j++)
-	  printf("%d", check_app);
+	  printf(".");
   }
 
   // jump to user application	
-  if (check_app == 1)
+  if (get_status_req < 50)
   { /* Jump to user application */
     JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
 		printf("JumpAddress: %x\r\n", JumpAddress);
