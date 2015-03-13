@@ -751,7 +751,7 @@ void CDfuSeDemoDlg::OnSelchangeCombodevices()
 				DWORD WPR  = 0x00;
 
 				DFUSTATUS DFUStatus1;
-				for (int k = 0; k < 100; k++)
+				for (int k = 0; k < 5; k++)
 				{
 					Sleep(10);
 					STDFU_Getstatus(&hDle, &DFUStatus1);

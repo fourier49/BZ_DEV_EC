@@ -634,7 +634,7 @@ static void DFU_Req_UPLOAD(void *pdev, USB_SETUP_REQ *req)
 volatile int get_status_req = 0;
 static void DFU_Req_GETSTATUS(void *pdev)
 {
- printf("DFU_Req_GETSTATUS: %d\r\n", ++get_status_req);
+  ++get_status_req;
   switch (DeviceState)
   {
   case   STATE_dfuDNLOAD_SYNC:

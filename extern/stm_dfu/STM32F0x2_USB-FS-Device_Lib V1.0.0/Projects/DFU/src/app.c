@@ -164,18 +164,19 @@ int main(void)
   }
 #endif
 
-  // fake delay loop of 200 ms
-  for (i=0; i<200; i++)
+  // fake delay loop of 1 sec
+  for (i=0; i<100; i++)
   {
-    int j;
     // sleep 1ms
-	for (j=0; j<100; j++)
+	  USB_BSP_mDelay(10);
 	  printf(".");
   }
 
+	printf("\r\nDFU-Detect=%d\r\n", get_status_req);
   // jump to user application	
-  if (get_status_req < 50)
+  if (get_status_req == 0)
   { /* Jump to user application */
+	USB_BSP_mDelay(1000); // delay 1 sec
     JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
 		printf("JumpAddress: %x\r\n", JumpAddress);
     Jump_To_Application = (pFunction) JumpAddress;
