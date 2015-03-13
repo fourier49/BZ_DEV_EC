@@ -3238,6 +3238,31 @@ DECLARE_CONSOLE_COMMAND(typec, command_typec,
 #endif /* CONFIG_CMD_TYPEC */
 #endif /* CONFIG_USBC_SS_MUX */
 
+#ifdef CONFIG_CMD_AUX
+static int command_aux(int argc, char **argv)
+{
+	char *e;
+	int port;
+
+	if (argc != 2)
+		return EC_ERROR_PARAM_COUNT;
+
+	port = strtoi(argv[1], &e, 10);
+	if (*e || port >= PD_PORT_COUNT)
+		return EC_ERROR_PARAM1;
+
+	ccprintf("Port C%d: CC1 %d mV  CC2 %d mV (polarity:CC%d)\n",
+		port, pd_adc_read(port, 0), pd_adc_read(port, 1),
+		pd_get_polarity(port) + 1);
+	ccprintf("AUX_N: %d  P: %d\n", adc_read_channel(ADC_CH_AUX_N), adc_read_channel(ADC_CH_AUX_P));
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(aux, command_aux,
+			"<port> ",
+			"Show type-C and AUX status",
+			NULL);
+#endif /* CONFIG_CMD_AUX */
+
 #ifdef CONFIG_BIZ_EMU_HOST
 static int command_amode(int argc, char **argv)
 {

@@ -115,6 +115,8 @@ DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 const struct adc_t adc_channels[] = {
 	/* USB PD CC lines sensing. Converted to mV (3300mV/4096). */
 	[ADC_CH_CC1_PD] = {"USB_C_CC1_PD", 3300, 4096, 0, STM32_AIN(1)},
+	[ADC_CH_AUX_N]  = {"DP_AUX_N", 3300, 4096, 0, STM32_AIN(5)},
+	[ADC_CH_AUX_P]  = {"DP_AUX_P", 3300, 4096, 0, STM32_AIN(6)},
 };
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 const void * const usb_strings[] = {
