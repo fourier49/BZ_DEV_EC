@@ -8,18 +8,21 @@
 #include "adc_chip.h"
 #include "common.h"
 #include "ec_version.h"
+#include "console.h"
 #include "gpio.h"
 #include "hooks.h"
 #include "registers.h"
 #include "usb.h"
 #include "usb_bb.h"
 #include "usb_pd.h"
+#include "usb_pd_config.h"
 #include "task.h"
 #include "timer.h"
 #include "util.h"
 
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
+volatile int dp_direction = DP_DIR_DISCONNECTED;
 
 void hpd_event(enum gpio_signal signal);
 #include "gpio_list.h"
@@ -77,6 +80,10 @@ void hpd_event(enum gpio_signal signal)
 	/* All previous hpd level events need to be re-triggered */
 	hook_call_deferred(hpd_lvl_deferred, -1);
 
+	// HPD pin is a GPIO_OUTPUT
+	if (dp_direction == DP_DIR_REVERSE)
+		return;
+
 	/* It's a glitch.  Previous time moves but level is the same. */
 	if (cur_delta < HPD_DEBOUNCE_GLITCH)
 		return;
@@ -89,6 +96,31 @@ void hpd_event(enum gpio_signal signal)
 
 	hpd_prev_level = level;
 }
+
+/* periodic monitor the DP AUX, for UFP_D / DFP_D detection */
+static void dp_aux_gpio_monitor(void)
+{
+	int new_dir = dp_cable_direction(0);
+	if (dp_direction == new_dir)
+		goto L_exit;
+
+	ccprintf("DP_DIR %d -> %d\n", dp_direction, new_dir);
+	dp_direction = new_dir;
+	switch (dp_direction) {
+	case DP_DIR_REVERSE:
+		gpio_set_flags( GPIO_DP_HPD, GPIO_OUT_LOW );
+		break;
+	case DP_DIR_NORMAL:
+	default:
+		gpio_set_flags( GPIO_DP_HPD, GPIO_INT_BOTH );
+		break;
+	}
+
+L_exit:
+	hook_call_deferred(dp_aux_gpio_monitor, 50 * MSEC);
+}
+
+DECLARE_DEFERRED(dp_aux_gpio_monitor);
 
 /* Initialize board. */
 void board_config_pre_init(void)
@@ -106,6 +138,8 @@ static void board_init(void)
 	hpd_prev_level = gpio_get_level(GPIO_DP_HPD);
 	hpd_prev_ts = now.val;
 	gpio_enable_interrupt(GPIO_DP_HPD);
+
+	hook_call_deferred(dp_aux_gpio_monitor, 50 * MSEC);
 
 	gpio_set_level(GPIO_STM_READY, 1); /* factory test only */
 }

@@ -135,6 +135,77 @@ static inline int pd_snk_is_vbus_provided(int port)
 	return 1;
 }
 
+#define DFPD_SBUOFF_AUX_N_L    3160
+#define DFPD_SBUOFF_AUX_N_H    3210
+#define DFPD_SBUOFF_AUX_P_H    50
+#define DFPD_SBUEN_AUX_N_L     1740
+#define DFPD_SBUEN_AUX_N_H     1780
+#define DFPD_SBUEN_AUX_P_H     50
+
+#define UFPD_SBUOFF_AUX_P_L    1040
+#define UFPD_SBUOFF_AUX_P_H    1090
+#define UFPD_SBUOFF_AUX_N_H    50
+#define UFPD_SBUEN_AUX_P_L     160
+#define UFPD_SBUEN_AUX_P_H     230
+#define UFPD_SBUEN_AUX_N_L     2760
+#define UFPD_SBUEN_AUX_N_H     2820
+
+#define DP_DIR_NORMAL          1
+#define DP_DIR_REVERSE         -1
+#define DP_DIR_DISCONNECTED    0
+/**
+ * Detect normal or reverse direction of type-C to DP cable
+ *
+ * Detect the cable direction by resistive voltage measurement
+ * on AUX_N & AUX_P based on DisplayPort connection.
+ *
+ * Normal  direction: connected to UFP_D (DP Monitor, Type-C NB)
+ *                    Spec fig 3-2
+ * Reverse direction: connected to DFP_D (DP NB, Type-C Monitor)
+ *                    Spec fig 3-3
+ *
+ * @param port   USB-C port number
+ * @return +1    if UFP_D connected, normal  direction
+ *         -1    if DFP_D connected, reverse direction
+ *         0     if disconnected
+ */
+
+static inline int dp_cable_direction(int port)
+{
+	int aux_n = adc_read_channel(ADC_CH_AUX_N);
+	int aux_p = adc_read_channel(ADC_CH_AUX_P);
+
+	if (gpio_get_level(GPIO_PD_SBU_ENABLE)) {
+		// SBUEN,  SBU isolation switches are closed
+		//-------------------------------------------
+		if (aux_p >= UFPD_SBUEN_AUX_P_L && aux_p <= UFPD_SBUEN_AUX_P_H
+		&&  aux_n >= UFPD_SBUEN_AUX_N_L && aux_n <= UFPD_SBUEN_AUX_N_H)
+			return DP_DIR_NORMAL;
+
+		if (aux_n >= DFPD_SBUEN_AUX_N_L && aux_n <= DFPD_SBUEN_AUX_N_H
+		&&  aux_p <= DFPD_SBUEN_AUX_P_H)
+			return DP_DIR_REVERSE;
+	}
+	else {
+		// SBUOFF, SBU isolation switches are opened
+		//-------------------------------------------
+		if (aux_p >= UFPD_SBUOFF_AUX_P_L && aux_p <= UFPD_SBUOFF_AUX_P_H
+		&&  aux_n <= UFPD_SBUOFF_AUX_N_H)
+			return DP_DIR_NORMAL;
+
+		if (aux_n >= DFPD_SBUOFF_AUX_N_L && aux_n <= DFPD_SBUOFF_AUX_N_H
+		&&  aux_p <= DFPD_SBUOFF_AUX_P_H)
+			return DP_DIR_REVERSE;
+	}
+
+	// Spec p.64, Some displays do not provide this pull-up resistor (1M on AUX_CH_P),
+	// but assert HPD without DisplayPort DFP_D detection."
+	if ((gpio_list[GPIO_DP_HPD].flags & GPIO_INPUT) && gpio_get_level(GPIO_DP_HPD))
+		return DP_DIR_NORMAL;
+
+	return DP_DIR_DISCONNECTED;
+}
+
 /* 3.0A DFP : no-connect voltage is 2.45V */
 #define PD_SRC_VNC 2450 /* mV */
 
