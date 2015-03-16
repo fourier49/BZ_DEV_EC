@@ -573,7 +573,8 @@ struct pd_policy {
 #define USB_SID_PD          0xff00 /* power delivery */
 #define USB_SID_DISPLAYPORT 0xff01
 
-#define USB_GOOGLE_TYPEC_URL "http://www.google.com/chrome/devices/typec"
+#define USB_GOOGLE_TYPEC_URL  "http://www.google.com/chrome/devices/typec"
+#define USB_BIZLINK_TYPEC_URL "http://www.bizlinktech.com/itbu/devices/typec"
 /* USB Vendor ID assigned to Google Inc. */
 #define USB_VID_GOOGLE  0x18d1
 #define USB_VID_BIZLINK 0x06C4

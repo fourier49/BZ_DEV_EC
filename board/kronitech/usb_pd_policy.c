@@ -432,7 +432,7 @@ const uint32_t vdo_idh = VDO_IDH(0, /* data caps as USB host */
 				 1, /* data caps as USB device */
 				 IDH_PTYPE_AMA, /* Alternate mode */
 				 1, /* supports alt modes */
-				 USB_VID_GOOGLE);
+				 USB_VID_BIZLINK);
 
 const uint32_t vdo_product = VDO_PRODUCT(CONFIG_USB_PID, CONFIG_USB_BCD_DEV);
 
