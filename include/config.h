@@ -356,6 +356,7 @@
 #define CONFIG_CMD_HASH
 #undef CONFIG_CMD_HOSTCMD
 #define CONFIG_CMD_I2C_SCAN
+#define CONFIG_CMD_I2C_XFER
 #define CONFIG_CMD_IDLE_STATS
 #undef CONFIG_CMD_ILIM
 #undef CONFIG_CMD_JUMPTAGS
@@ -587,6 +588,15 @@
 
 #undef CONFIG_FLASH_PHYSICAL_SIZE
 #undef CONFIG_FLASH_PROTECT_NEXT_BOOT
+
+/*
+ * Use a bank of flash to store its persistent write protect state.  This
+ * allows ECs with internal flash to emulate something closer to a SPI flash
+ * write protect register.  If this is not defined, write protect state is
+ * maintained solely by the physical flash driver.
+ */
+#define CONFIG_FLASH_PSTATE
+
 #undef CONFIG_FLASH_SIZE
 #undef CONFIG_FLASH_WRITE_IDEAL_SIZE
 #undef CONFIG_FLASH_WRITE_SIZE
@@ -872,6 +882,12 @@
 #undef CONFIG_LIGHTBAR_POWER_RAILS
 
 /*
+ * For tap sequence, show the last segment in dim to give a better idea of
+ * battery percentage.
+ */
+#undef CONFIG_LIGHTBAR_TAP_DIM_LAST_SEGMENT
+
+/*
  * Low power idle options. These are disabled by default and all boards that
  * want to use low power idle must define it. When using the LFIOSC, the low
  * frequency clock will be used to conserve even more power when possible.
@@ -960,14 +976,6 @@
 
 /* Compile common code for AP power state machine */
 #undef CONFIG_POWER_COMMON
-
-/*
- * The EC stores persistent state information for flash write protect in a
- * block of flash.  If this option is defined, the information is in the last
- * bank of flash, instead of the last bank in the nominally read-only section
- * of flash.
- */
-#undef CONFIG_PSTATE_AT_END
 
 /* Use part of the EC's data EEPROM to hold persistent storage for the AP. */
 #undef CONFIG_PSTORE

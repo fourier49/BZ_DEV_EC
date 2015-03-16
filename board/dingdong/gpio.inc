@@ -8,8 +8,8 @@ GPIO(DP_HPD,            A, 0,  GPIO_INT_BOTH, hpd_event)
 GPIO(USB_C_CC1_PD,      A, 1,  GPIO_ANALOG,   NULL)
 GPIO(STM_READY,         A, 2,  GPIO_OUT_LOW,  NULL)  /* factory test only */
 GPIO(PD_DAC_REF,        A, 4,  GPIO_ANALOG,   NULL)
-GPIO(DP_AUX_N,          A, 5,  GPIO_INPUT,    NULL)
-GPIO(DP_AUX_P,          A, 6,  GPIO_INPUT,    NULL)
+GPIO(DP_AUX_N,          A, 5,  GPIO_ANALOG,    NULL)
+GPIO(DP_AUX_P,          A, 6,  GPIO_ANALOG,    NULL)
 
 GPIO(PD_SBU_ENABLE,     A, 8,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_DM,            A, 11, GPIO_ANALOG,   NULL)

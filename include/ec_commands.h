@@ -838,7 +838,7 @@ struct ec_params_flash_erase {
  * re-requesting the desired flags, or by a hard reset if that fails.
  */
 #define EC_FLASH_PROTECT_ERROR_INCONSISTENT (1 << 5)
-/* Entile flash code protected when the EC boots */
+/* Entire flash code protected when the EC boots */
 #define EC_FLASH_PROTECT_ALL_AT_BOOT        (1 << 6)
 
 struct ec_params_flash_protect {
@@ -2780,7 +2780,8 @@ enum usb_chg_type {
 	USB_CHG_TYPE_BC12_DCP,
 	USB_CHG_TYPE_BC12_CDP,
 	USB_CHG_TYPE_BC12_SDP,
-	USB_CHG_TYPE_OTHER
+	USB_CHG_TYPE_OTHER,
+	USB_CHG_TYPE_VBUS,
 };
 enum usb_power_roles {
 	USB_PD_PORT_POWER_DISCONNECTED,
@@ -2986,7 +2987,7 @@ struct ec_params_usb_pd_set_mode_request {
 } __packed;
 
 /* Ask the PD MCU to record a log of a requested type */
-#define EC_CMD_PD_WRITE_LOG_ENTRY 0x117
+#define EC_CMD_PD_WRITE_LOG_ENTRY 0x118
 
 struct ec_params_pd_write_log_entry {
 	uint8_t type; /* event type : see PD_EVENT_xx above */
