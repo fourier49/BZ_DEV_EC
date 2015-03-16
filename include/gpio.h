@@ -68,7 +68,7 @@ struct gpio_info {
 };
 
 /* Signal information from board.c.  Must match order from enum gpio_signal. */
-extern const struct gpio_info gpio_list[];
+extern struct gpio_info gpio_list[];
 
 /* GPIO alternate function structure, for use by board.c */
 struct gpio_alt_func {

@@ -89,8 +89,9 @@ void gpio_config_module(enum module_id id, int enable)
 
 void gpio_set_flags(enum gpio_signal signal, int flags)
 {
-	const struct gpio_info *g = gpio_list + signal;
+	struct gpio_info *g = gpio_list + signal;
 
+	g->flags = flags;
 	gpio_set_flags_by_mask(g->port, g->mask, flags);
 }
 
@@ -127,7 +128,7 @@ static int command_gpio_get(int argc, char **argv)
 
 		v = gpio_get_level(i);
 		changed = last_val_changed(i, v);
-		ccprintf("  %d%c %s\n", v, (changed ? '*' : ' '), g->name);
+		ccprintf("  %d%c %08x %s\n", v, (changed ? '*' : ' '), g->flags, g->name);
 
 		/* Flush console to avoid truncating output */
 		cflush();
