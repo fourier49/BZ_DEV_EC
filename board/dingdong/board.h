@@ -48,7 +48,7 @@
 #define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
 /* No Write-protect GPIO, force the write-protection */
-#define CONFIG_WP_ALWAYS
+/* #define CONFIG_WP_ALWAYS */
 
 #ifndef __ASSEMBLER__
 
