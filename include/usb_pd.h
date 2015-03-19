@@ -521,6 +521,12 @@ struct pd_policy {
 #define PD_VDO_HPD_IRQ(x) ((x >> 8) & 1)
 #define PD_VDO_HPD_LVL(x) ((x >> 7) & 1)
 
+#define PD_VDO_STS_CONN(x) ((x) & 0x03)
+#define DP_STS_CONN_NONE    0
+#define DP_STS_CONN_DFPD    1
+#define DP_STS_CONN_UFPD    2
+#define DP_STS_CONN_BOTH    3
+
 #define HPD_DEBOUNCE_LVL    (100*MSEC)
 #define HPD_DEBOUNCE_IRQ    (2*MSEC)
 #define HPD_DEBOUNCE_GLITCH  250 /* USEC */

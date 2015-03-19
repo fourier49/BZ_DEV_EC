@@ -22,7 +22,6 @@
 
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
-volatile int dp_direction = DP_DIR_DISCONNECTED;
 
 void hpd_event(enum gpio_signal signal);
 #include "gpio_list.h"
@@ -80,9 +79,11 @@ void hpd_event(enum gpio_signal signal)
 	/* All previous hpd level events need to be re-triggered */
 	hook_call_deferred(hpd_lvl_deferred, -1);
 
-	// HPD pin is a GPIO_OUTPUT
-	if (dp_direction == DP_DIR_REVERSE)
+#if 0  // temporarily disable
+	// Type-C end must be DFP_D (or BOTH) for this HPD event message
+	if (!(tce_conn_status & DP_STS_CONN_DFPD))  // not DFP_D or BOTH
 		return;
+#endif
 
 	/* It's a glitch.  Previous time moves but level is the same. */
 	if (cur_delta < HPD_DEBOUNCE_GLITCH)
@@ -97,24 +98,34 @@ void hpd_event(enum gpio_signal signal)
 	hpd_prev_level = level;
 }
 
+extern void pd_attention_dp_status(int port);
+
 /* periodic monitor the DP AUX, for UFP_D / DFP_D detection */
 static void dp_aux_gpio_monitor(void)
 {
-	int new_dir = dp_cable_direction(0);
-	if (dp_direction == new_dir)
+	int port = 0;
+	int new_sts = dpe_plug_conn_status(port);
+
+	if (new_sts == dpe_conn_status)
 		goto L_exit;
 
-	ccprintf("DP_DIR %d -> %d\n", dp_direction, new_dir);
-	dp_direction = new_dir;
-	switch (dp_direction) {
-	case DP_DIR_REVERSE:
+	ccprints("DPE:%d->%d HPD:%d EN:%d AUX_N/P:%d/%d", dpe_conn_status, new_sts,
+		gpio_get_level(GPIO_DP_HPD), gpio_get_level(GPIO_PD_SBU_ENABLE),
+		adc_read_channel(ADC_CH_AUX_N), adc_read_channel(ADC_CH_AUX_P));
+
+	dpe_conn_status = new_sts;
+	switch (dpe_conn_status) {
+	case DPE_PLUG_DFPD:
 		gpio_set_flags( GPIO_DP_HPD, GPIO_OUT_LOW );
 		break;
-	case DP_DIR_NORMAL:
+	case DPE_PLUG_UFPD:
 	default:
 		gpio_set_flags( GPIO_DP_HPD, GPIO_INT_BOTH );
 		break;
 	}
+
+	usleep(20);
+	pd_attention_dp_status(port);
 
 L_exit:
 	hook_call_deferred(dp_aux_gpio_monitor, 50 * MSEC);

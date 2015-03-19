@@ -3254,9 +3254,9 @@ static int command_aux(int argc, char **argv)
 	ccprintf("Port C%d: CC1 %d mV  CC2 %d mV (polarity:CC%d)\n",
 		port, pd_adc_read(port, 0), pd_adc_read(port, 1),
 		pd_get_polarity(port) + 1);
-	ccprintf("HPD:%d  AUX_N:%d  P:%d  Dir:%d\n", gpio_get_level(GPIO_DP_HPD),
+	ccprintf("HPD:%d  AUX_N/P:%d/%d  DP_Conn:%d\n", gpio_get_level(GPIO_DP_HPD),
 		adc_read_channel(ADC_CH_AUX_N), adc_read_channel(ADC_CH_AUX_P),
-		dp_cable_direction(port));
+		dpe_plug_conn_status(port));
 	return EC_SUCCESS;
 }
 DECLARE_CONSOLE_COMMAND(aux, command_aux,
