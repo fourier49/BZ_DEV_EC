@@ -132,32 +132,42 @@ static void dp_aux_gpio_monitor(void)
 	int port = 0;
 	int new_sts = dpe_plug_conn_status(port);
 	static int unknown_resolving_cnt = 0;
+	static int sbu = -1;
 
-	if (hpd_event_triggering)    // skip AUX monitoring while HPD event
+	if (hpd_event_triggering) {
+		// skip AUX monitoring while HPD event
+		if (new_sts != DPE_PLUG_UNKNOWN) {
+			if (new_sts != dpe_conn_status)
+				ccprints("DPE:%d->%d hpd:%d EN:%d AUX_N/P:%d/%d", dpe_conn_status, new_sts,
+					gpio_get_level(GPIO_DP_HPD), gpio_get_level(GPIO_PD_SBU_ENABLE),
+					adc_read_channel(ADC_CH_AUX_N), adc_read_channel(ADC_CH_AUX_P));
+			dpe_conn_status = new_sts;
+		}
 		goto L_exit;
+	}
 
 	if (new_sts == DPE_PLUG_UNKNOWN) {
-		int sbu, aux_n=-1, aux_p=-1;
+		int aux_n=-1, aux_p=-1;
 
-		// every 4th time, measure again
-		if ((unknown_resolving_cnt % 4) == 3 || unknown_resolving_cnt >= DPE_CONN_UNKNOWN_RESOLVING) {
-			// break the SBU switch to do correct ADC measurement of AUX_N/P
-			sbu = gpio_get_level(GPIO_PD_SBU_ENABLE);
-			gpio_set_level(GPIO_PD_SBU_ENABLE, 0);
-			usleep(20);
+		if (++unknown_resolving_cnt <= DPE_CONN_UNKNOWN_RESOLVING) {
+			if (unknown_resolving_cnt == DPE_CONN_UNKNOWN_RESOLVING-1) {
+				// break the SBU switch to do correct ADC measurement of AUX_N/P
+				sbu = gpio_get_level(GPIO_PD_SBU_ENABLE);
+				gpio_set_level(GPIO_PD_SBU_ENABLE, 0);
+				goto L_exit;
+			}
+			else
+			if (unknown_resolving_cnt != DPE_CONN_UNKNOWN_RESOLVING) {
+				goto L_exit;
+			}
+
 			new_sts = dpe_plug_conn_status(port);
 			aux_n = adc_read_channel(ADC_CH_AUX_N);
 			aux_p = adc_read_channel(ADC_CH_AUX_P);
-			gpio_set_level(GPIO_PD_SBU_ENABLE, sbu);
 		}
 
 		// Still in UNKNOWN state?
 		if (new_sts == DPE_PLUG_UNKNOWN) {
-			// check if stay in DPE_PLUG_UNKNOWN long enough
-			if (unknown_resolving_cnt < DPE_CONN_UNKNOWN_RESOLVING) {
-				unknown_resolving_cnt++;
-				goto L_exit;
-			}
 			new_sts = DPE_PLUG_NONE;
 
 			if (new_sts != dpe_conn_status)
@@ -167,6 +177,10 @@ static void dp_aux_gpio_monitor(void)
 		}
 	}
 	unknown_resolving_cnt = 0;
+	if (sbu >= 0) {
+		gpio_set_level(GPIO_PD_SBU_ENABLE, sbu);
+		sbu = -1;
+	}
 
 	if (new_sts == dpe_conn_status)
 		goto L_exit;
@@ -186,7 +200,7 @@ static void dp_aux_gpio_monitor(void)
 		break;
 	}
 
-	usleep(20);
+	usleep(10);
 	pd_attention_dp_status(port);
 
 L_exit:
