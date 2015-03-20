@@ -2935,7 +2935,7 @@ void pd_send_hpd(int port, enum hpd_event hpd)
 	pd_send_vdm(port, USB_SID_DISPLAYPORT,
 		    VDO_OPOS(opos) | CMD_ATTENTION, data, 1);
 	if (debug_level >= 1)
-		CPRINTF("VDM/HPD %08x - %d\n", data[0], hpd);
+		CPRINTS("VDM/HPD %08x - %d", data[0], hpd);
 	/* Wait until VDM is done. */
 	while (pd[0].vdm_state > 0)
 		task_wait_event(USB_PD_RX_TMOUT_US * (PD_RETRY_COUNT + 1));

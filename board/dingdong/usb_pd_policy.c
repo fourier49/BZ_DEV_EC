@@ -213,13 +213,7 @@ int pd_update_dp_status(uint32_t *data)
 		default:
 		case DP_STS_CONN_NONE:
 			CPRINTF("ERR TCE_CONN %d (%d)\n", tce_conn_status, dpe_conn_status);
-#if 0
 			return -1;  /* NAK */
-#else
-			hpd = dp_drive_hpd_out( data /*payload*/ );
-			if (hpd < 0) return -1;  /* NAK */
-			break;
-#endif
 		}
 		break;
 	case DPE_PLUG_UFPD:
@@ -234,12 +228,7 @@ int pd_update_dp_status(uint32_t *data)
 		default:
 		case DP_STS_CONN_NONE:
 			CPRINTF("ERR TCE_CONN %d (%d)\n", tce_conn_status, dpe_conn_status);
-#if 0
 			return -1;  /* NAK */
-#else
-			hpd = gpio_get_level(GPIO_DP_HPD);
-			break;
-#endif
 		}
 		break;
 	case DPE_PLUG_NONE:
@@ -284,6 +273,11 @@ static int dp_status(int port, uint32_t *payload)
 		return 0; /* nak */
 
 	tce_conn_status = PD_VDO_STS_CONN(payload[1]);
+#if 1  // temporarily work-around, some Host (samus_pd) have this field as 0 => force it to DFP_D
+	if (tce_conn_status == DP_STS_CONN_NONE)
+		tce_conn_status = DP_STS_CONN_DFPD;
+#endif
+
 	if (pd_update_dp_status(payload + 1) < 0)
 		return 0; /* NAK */
 	return 2;

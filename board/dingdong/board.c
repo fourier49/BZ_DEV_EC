@@ -22,6 +22,8 @@
 
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
+static volatile int hpd_reported_level = -1;
+static volatile int hpd_event_triggering;   // HPD event is triggering and not resolved yet
 
 void hpd_event(enum gpio_signal signal);
 #include "gpio_list.h"
@@ -51,6 +53,7 @@ void hpd_event(enum gpio_signal signal);
 
 void hpd_irq_deferred(void)
 {
+	hpd_reported_level = -1;
 	pd_send_hpd(0, hpd_irq);
 }
 DECLARE_DEFERRED(hpd_irq_deferred);
@@ -59,6 +62,11 @@ void hpd_lvl_deferred(void)
 {
 	int level = gpio_get_level(GPIO_DP_HPD);
 
+	if (level == hpd_reported_level)
+		// due to glitch, the level may be reported already
+		return;
+	hpd_reported_level = level;
+
 	if (level != hpd_prev_level)
 		/* It's a glitch while in deferred or canceled action */
 		return;
@@ -66,6 +74,12 @@ void hpd_lvl_deferred(void)
 	pd_send_hpd(0, (level) ? hpd_high : hpd_low);
 }
 DECLARE_DEFERRED(hpd_lvl_deferred);
+
+void hpd_event_trigger_clear(void)
+{
+	hpd_event_triggering = 0;
+}
+DECLARE_DEFERRED(hpd_event_trigger_clear);
 
 void hpd_event(enum gpio_signal signal)
 {
@@ -81,15 +95,21 @@ void hpd_event(enum gpio_signal signal)
 	/* All previous hpd level events need to be re-triggered */
 	hook_call_deferred(hpd_lvl_deferred, -1);
 
-#if 0  // temporarily disable
 	// Type-C end must be DFP_D (or BOTH) for this HPD event message
 	if (!(tce_conn_status & DP_STS_CONN_DFPD))  // not DFP_D or BOTH
 		return;
-#endif
 
 	/* It's a glitch.  Previous time moves but level is the same. */
-	if (cur_delta < HPD_DEBOUNCE_GLITCH)
+	if (cur_delta < HPD_DEBOUNCE_GLITCH) {
+		// this glitch may be the last edge but filtered
+		//    ------------+    +--+
+		//                |    |  |
+		//                +----+  +----------------------
+		//                     IRQ
+		//                        glitch ==> filtered, LOW is eaten
+		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 		return;
+	}
 
 	if ((!prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
 		/* It's an irq */
@@ -97,7 +117,12 @@ void hpd_event(enum gpio_signal signal)
 	else if (cur_delta > HPD_DEBOUNCE_IRQ)
 		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 
+	hpd_event_triggering = 1;
+	hook_call_deferred(hpd_event_trigger_clear, 300 * MSEC);
 }
+
+#define DPE_CONN_MONITOR_INTERVAL   100 * MSEC
+#define DPE_CONN_UNKNOWN_RESOLVING  12
 
 extern void pd_attention_dp_status(int port);
 
@@ -106,6 +131,42 @@ static void dp_aux_gpio_monitor(void)
 {
 	int port = 0;
 	int new_sts = dpe_plug_conn_status(port);
+	static int unknown_resolving_cnt = 0;
+
+	if (hpd_event_triggering)    // skip AUX monitoring while HPD event
+		goto L_exit;
+
+	if (new_sts == DPE_PLUG_UNKNOWN) {
+		int sbu, aux_n=-1, aux_p=-1;
+
+		// every 4th time, measure again
+		if ((unknown_resolving_cnt % 4) == 3 || unknown_resolving_cnt >= DPE_CONN_UNKNOWN_RESOLVING) {
+			// break the SBU switch to do correct ADC measurement of AUX_N/P
+			sbu = gpio_get_level(GPIO_PD_SBU_ENABLE);
+			gpio_set_level(GPIO_PD_SBU_ENABLE, 0);
+			usleep(20);
+			new_sts = dpe_plug_conn_status(port);
+			aux_n = adc_read_channel(ADC_CH_AUX_N);
+			aux_p = adc_read_channel(ADC_CH_AUX_P);
+			gpio_set_level(GPIO_PD_SBU_ENABLE, sbu);
+		}
+
+		// Still in UNKNOWN state?
+		if (new_sts == DPE_PLUG_UNKNOWN) {
+			// check if stay in DPE_PLUG_UNKNOWN long enough
+			if (unknown_resolving_cnt < DPE_CONN_UNKNOWN_RESOLVING) {
+				unknown_resolving_cnt++;
+				goto L_exit;
+			}
+			new_sts = DPE_PLUG_NONE;
+
+			if (new_sts != dpe_conn_status)
+				ccprintf("dpe:%d hpd:%d en:%d aux_n/p:%d/%d\n", dpe_conn_status,
+					gpio_get_level(GPIO_DP_HPD), gpio_get_level(GPIO_PD_SBU_ENABLE),
+					aux_n, aux_p);
+		}
+	}
+	unknown_resolving_cnt = 0;
 
 	if (new_sts == dpe_conn_status)
 		goto L_exit;
@@ -129,7 +190,7 @@ static void dp_aux_gpio_monitor(void)
 	pd_attention_dp_status(port);
 
 L_exit:
-	hook_call_deferred(dp_aux_gpio_monitor, 50 * MSEC);
+	hook_call_deferred(dp_aux_gpio_monitor, DPE_CONN_MONITOR_INTERVAL);
 }
 
 DECLARE_DEFERRED(dp_aux_gpio_monitor);
@@ -151,7 +212,7 @@ static void board_init(void)
 	hpd_prev_ts = now.val;
 	gpio_enable_interrupt(GPIO_DP_HPD);
 
-	hook_call_deferred(dp_aux_gpio_monitor, 50 * MSEC);
+	hook_call_deferred(dp_aux_gpio_monitor, DPE_CONN_MONITOR_INTERVAL);
 
 	gpio_set_level(GPIO_STM_READY, 1); /* factory test only */
 }

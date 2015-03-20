@@ -22,6 +22,7 @@
 
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
+static volatile int hpd_reported_level = -1;
 
 void hpd_event(enum gpio_signal signal);
 #include "gpio_list.h"
@@ -51,6 +52,7 @@ void hpd_event(enum gpio_signal signal);
 
 void hpd_irq_deferred(void)
 {
+	hpd_reported_level = -1;
 	pd_send_hpd(0, hpd_irq);
 }
 DECLARE_DEFERRED(hpd_irq_deferred);
@@ -58,6 +60,11 @@ DECLARE_DEFERRED(hpd_irq_deferred);
 void hpd_lvl_deferred(void)
 {
 	int level = gpio_get_level(GPIO_DP_HPD);
+
+	if (level == hpd_reported_level)
+		// due to glitch, the level may be reported already
+		return;
+	hpd_reported_level = level;
 
 	if (level != hpd_prev_level)
 		/* It's a glitch while in deferred or canceled action */
@@ -82,8 +89,16 @@ void hpd_event(enum gpio_signal signal)
 	hook_call_deferred(hpd_lvl_deferred, -1);
 
 	/* It's a glitch.  Previous time moves but level is the same. */
-	if (cur_delta < HPD_DEBOUNCE_GLITCH)
+	if (cur_delta < HPD_DEBOUNCE_GLITCH) {
+		// this glitch may be the last edge but filtered
+		//    ------------+    +--+
+		//                |    |  |
+		//                +----+  +----------------------
+		//                     IRQ
+		//                        glitch ==> filtered, LOW is eaten
+		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 		return;
+	}
 
 	if ((!prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
 		/* It's an irq */

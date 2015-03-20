@@ -284,7 +284,7 @@ static int svdm_dp_status(int port, uint32_t *payload)
 				   0, /* multi-function ... no */
 				   (!!(dp_flags[port] & DP_FLAGS_DP_ON)),
 				   0, /* power low? ... no */
-				   (!!(dp_flags[port] & DP_FLAGS_DP_ON)));
+				   DP_STS_CONN_DFPD);
 	return 2;
 };
 
