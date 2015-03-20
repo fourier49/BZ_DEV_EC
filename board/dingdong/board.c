@@ -71,10 +71,12 @@ void hpd_event(enum gpio_signal signal)
 {
 	timestamp_t now = get_time();
 	int level = gpio_get_level(signal);
+	int prev_level = hpd_prev_level;
 	uint64_t cur_delta = now.val - hpd_prev_ts;
 
 	/* store current time */
 	hpd_prev_ts = now.val;
+	hpd_prev_level = level;
 
 	/* All previous hpd level events need to be re-triggered */
 	hook_call_deferred(hpd_lvl_deferred, -1);
@@ -89,13 +91,12 @@ void hpd_event(enum gpio_signal signal)
 	if (cur_delta < HPD_DEBOUNCE_GLITCH)
 		return;
 
-	if ((!hpd_prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
+	if ((!prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
 		/* It's an irq */
 		hook_call_deferred(hpd_irq_deferred, 0);
 	else if (cur_delta > HPD_DEBOUNCE_IRQ)
 		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 
-	hpd_prev_level = level;
 }
 
 extern void pd_attention_dp_status(int port);
