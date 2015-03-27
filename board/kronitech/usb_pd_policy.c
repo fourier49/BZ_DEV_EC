@@ -35,18 +35,16 @@
 #define INPUT_VOLTAGE_DEADBAND_MIN 9700
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
+#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_SUSPEND | PDO_FIXED_COMM_CAP)
 
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,   900, PDO_FIXED_FLAGS),
+		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
 		PDO_FIXED(20000, 3000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
 const uint32_t pd_snk_pdo[] = {
-		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
-		PDO_BATT(5000, 20000, 15000),
-		PDO_VAR(5000, 20000, 3000),
+		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
@@ -291,11 +289,20 @@ static int svdm_dp_status(int port, uint32_t *payload)
 static int svdm_dp_config(int port, uint32_t *payload)
 {
 	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
-	board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
+	int pins;
+
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
 			 CMD_DP_CONFIG | VDO_OPOS(opos));
-	payload[1] = VDO_DP_CFG(MODE_DP_PIN_E, /* sink pins */
-				MODE_DP_PIN_E, /* src pins */
+	if (dp_flags[port] & DP_FLAGS_MFUNC_PREF) {
+		pins = MODE_DP_PIN_D;
+		board_set_usb_mux(port, TYPEC_MUX_DOCK, pd_get_polarity(port));
+	}
+	else {
+		pins = MODE_DP_PIN_C;
+		board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
+	}
+	payload[1] = VDO_DP_CFG(pins,  /* sink pins */
+				pins,  /* src pins */
 				1,             /* DPv1.3 signaling */
 				2);            /* UFP connected */
 	return 2;
@@ -338,6 +345,7 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 	int cur_lvl;
 	int lvl = PD_VDO_HPD_LVL(payload[1]);
 	int irq = PD_VDO_HPD_IRQ(payload[1]);
+	int mfp = PD_VDO_MFUNC_PREF(payload[1]);
 	enum gpio_signal hpd = PORT_TO_HPD(port);
 	cur_lvl = gpio_get_level(hpd);
 
@@ -347,6 +355,8 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 			dp_flags[port] |= DP_FLAGS_HPD_HI_PENDING;
 		return 1;
 	}
+	if (mfp)
+		dp_flags[port] |= DP_FLAGS_MFUNC_PREF;
 
 	if (irq & cur_lvl) {
 		gpio_set_level(hpd, 0);
@@ -471,9 +481,9 @@ static int svdm_response_svids(int port, uint32_t *payload)
 #define OPOS 1
 
 const uint32_t vdo_dp_mode[MODE_CNT] =  {
-	VDO_MODE_DP(MODE_DP_PIN_C  /* UFP pin cfg supported */
+	VDO_MODE_DP(0,		   /* UFP pin cfg supported : none */
+		    MODE_DP_PIN_C  /* DFP pin cfg supported */
 		  | MODE_DP_PIN_D,
-		    0,		   /* DFP pin cfg supported : none */
 		    0,		   /* with usb2.0 signalling in AMode */
 		    CABLE_PLUG,	   /* its a plug */
 		    MODE_DP_V13,   /* DPv1.3 Support, no Gen2 */

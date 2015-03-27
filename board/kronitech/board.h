@@ -69,6 +69,7 @@
 #define CONFIG_USB_PD_IDENTITY_HW_VERS 1
 #define CONFIG_USB_PD_IDENTITY_SW_VERS 1
 #define CONFIG_USBC_SS_MUX
+#define CONFIG_USBC_VCONN
 #undef  CONFIG_WATCHDOG_HELP
 
 /*
@@ -94,7 +95,7 @@
 #define I2C_PORT_EC I2C_PORT_SLAVE
 
 /* USB configuration */
-#define CONFIG_USB_PID 0x5010
+#define CONFIG_USB_PID 0x6001
 #define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
 /* slave address for host commands */

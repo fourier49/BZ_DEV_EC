@@ -207,6 +207,7 @@ enum hpd_event {
 /* DisplayPort flags */
 #define DP_FLAGS_DP_ON              (1 << 0) /* Display port mode is on */
 #define DP_FLAGS_HPD_HI_PENDING     (1 << 1) /* Pending HPD_HI */
+#define DP_FLAGS_MFUNC_PREF         (1 << 2) /* Preference of Multi-function */
 
 /* supported alternate modes */
 enum pd_alternate_modes {
@@ -520,6 +521,7 @@ struct pd_policy {
 
 #define PD_VDO_HPD_IRQ(x) ((x >> 8) & 1)
 #define PD_VDO_HPD_LVL(x) ((x >> 7) & 1)
+#define PD_VDO_MFUNC_PREF(x) ((x >> 4) & 1)
 
 #define PD_VDO_STS_CONN(x) ((x) & 0x03)
 #define DP_STS_CONN_NONE    0
