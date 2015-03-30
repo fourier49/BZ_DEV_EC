@@ -17,12 +17,16 @@
 #include "usb.h"
 #include "usb_bb.h"
 #include "usb_pd.h"
+#include "usb_pd_config.h"
 #include "version.h"
 
 #define CPRINTF(format, args...) cprintf(CC_USBPD, format, ## args)
 #define CPRINTS(format, args...) cprints(CC_USBPD, format, ## args)
 
 #define PDO_FIXED_FLAGS 0
+
+volatile int dpe_conn_status = DPE_PLUG_NONE;  // Connection status of DP end
+int tce_conn_status = DP_STS_CONN_NONE;        // Connection status of Type-C end
 
 /* Source PDOs */
 const uint32_t pd_src_pdo[] = {};
@@ -136,12 +140,12 @@ static int svdm_response_svids(int port, uint32_t *payload)
 #define OPOS_GFU 1
 
 const uint32_t vdo_dp_modes[1] =  {
-	VDO_MODE_DP(0,             /* UFP pin cfg supported : none */
-		    MODE_DP_PIN_E, /* DFP pin cfg supported */
-		    1,		   /* no usb2.0 signalling in AMode */
+	VDO_MODE_DP(MODE_DP_PIN_E, /* UFP pin cfg supported, reverse direction */
+		    MODE_DP_PIN_E, /* DFP pin cfg supported, normal  direction */
+		    1,             /* no usb2.0 signalling in AMode */
 		    CABLE_PLUG,    /* its a plug */
 		    MODE_DP_V13,   /* DPv1.3 Support, no Gen2 */
-		    MODE_DP_SNK)   /* Its a sink only */
+		    MODE_DP_BOTH)  /* Both Source & Sink, reversible */
 };
 
 const uint32_t vdo_goog_modes[1] =  {
@@ -161,21 +165,121 @@ static int svdm_response_modes(int port, uint32_t *payload)
 	}
 }
 
+static void gpio_hpd_irq_deferred(void)
+{
+	gpio_set_level(GPIO_DP_HPD, 1);
+}
+
+DECLARE_DEFERRED(gpio_hpd_irq_deferred);
+
+// when cable is reversed, the HPD is an output GPIO
+static int dp_drive_hpd_out(uint32_t *payload)
+{
+	int cur_lvl;
+	int lvl = PD_VDO_HPD_LVL(payload[0]);
+	int irq = PD_VDO_HPD_IRQ(payload[0]);
+	cur_lvl = gpio_get_level(GPIO_DP_HPD);
+	if (irq & cur_lvl) {
+		CPRINTF("DP_STS: HPD_IRQ\n");
+		gpio_set_level(GPIO_DP_HPD, 0);
+		/* 250 usecs is minimum, 2msec is max */
+		hook_call_deferred(gpio_hpd_irq_deferred, 300);
+	} else if (irq & !cur_lvl) {
+		CPRINTF("PE ERR: IRQ_HPD w/ HPD_LOW\n");
+		return -1; /* nak */
+	} else {
+		CPRINTF("DP_STS: HPD_STATE=%d\n", lvl);
+		gpio_set_level(GPIO_DP_HPD, lvl);
+	}
+	/* ack */
+	return lvl;
+}
+
+int pd_update_dp_status(uint32_t *data)
+{
+	int hpd;
+
+	switch (dpe_conn_status) {
+	case DPE_PLUG_DFPD:
+		switch(tce_conn_status) {
+		case DP_STS_CONN_BOTH:
+		case DP_STS_CONN_UFPD:
+			hpd = dp_drive_hpd_out( data /*payload*/ );
+			if (hpd < 0) return -1;  /* NAK */
+			break;
+		case DP_STS_CONN_DFPD:
+			CPRINTF("ERR DP_CONN: DFP->DFP\n");
+			return -1;  /* NAK */
+		default:
+		case DP_STS_CONN_NONE:
+			CPRINTF("ERR TCE_CONN %d (%d)\n", tce_conn_status, dpe_conn_status);
+			return -1;  /* NAK */
+		}
+		break;
+	case DPE_PLUG_UFPD:
+		switch(tce_conn_status) {
+		case DP_STS_CONN_BOTH:
+		case DP_STS_CONN_DFPD:
+			hpd = gpio_get_level(GPIO_DP_HPD);
+			break;
+		case DP_STS_CONN_UFPD:
+			CPRINTF("ERR DP_CONN: UFP->UFP\n");
+			return -1;  /* NAK */
+		default:
+		case DP_STS_CONN_NONE:
+			CPRINTF("ERR TCE_CONN %d (%d)\n", tce_conn_status, dpe_conn_status);
+			return -1;  /* NAK */
+		}
+		break;
+	case DPE_PLUG_NONE:
+		hpd = gpio_get_level(GPIO_DP_HPD);
+		break;
+	default:
+		CPRINTF("ERR DP end status\n");
+		return -1;  /* NAK */
+	}
+
+	data[0] = VDO_DP_STATUS(0,                   /* IRQ_HPD */
+				(hpd == 1),          /* HPD_HI|LOW */
+				0,		     /* request exit DP */
+				0,		     /* request exit USB */
+				0,		     /* MF pref */
+				gpio_get_level(GPIO_PD_SBU_ENABLE),
+				0,		     /* power low */
+				dpe_conn_status);
+
+	return 0; // success
+}
+
+// used to send ATTENTION status to inform the status changed
+void pd_attention_dp_status(int port)
+{
+	uint32_t data[1];
+	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
+	if (opos != OPOS_DP)
+		return;
+
+	if (pd_update_dp_status(data) < 0)
+		return;
+
+	pd_send_vdm(port, USB_SID_DISPLAYPORT,
+		    VDO_OPOS(opos) | CMD_ATTENTION, data, 1);
+}
+
 static int dp_status(int port, uint32_t *payload)
 {
 	int opos = PD_VDO_OPOS(payload[0]);
-	int hpd = gpio_get_level(GPIO_DP_HPD);
 	if (opos != OPOS_DP)
 		return 0; /* nak */
 
-	payload[1] = VDO_DP_STATUS(0,                /* IRQ_HPD */
-				   (hpd == 1),       /* HPD_HI|LOW */
-				   0,		     /* request exit DP */
-				   0,		     /* request exit USB */
-				   0,		     /* MF pref */
-				   gpio_get_level(GPIO_PD_SBU_ENABLE),
-				   0,		     /* power low */
-				   0x2);
+	tce_conn_status = PD_VDO_STS_CONN(payload[1]);
+#if 1  // temporarily work-around, some Host (samus_pd) have this field as 0 => force it to DFP_D
+	if (tce_conn_status == DP_STS_CONN_NONE)
+		tce_conn_status = DP_STS_CONN_DFPD;
+#endif
+
+	if (pd_update_dp_status(payload + 1) < 0)
+		return 0; /* NAK */
 	return 2;
 }
 
@@ -233,6 +337,7 @@ static int svdm_exit_mode(int port, uint32_t *payload)
 	} else {
 		CPRINTF("Unknown exit mode req:0x%08x\n", payload[0]);
 	}
+	tce_conn_status = DP_STS_CONN_NONE;
 
 	return 1; /* Must return ACK */
 }

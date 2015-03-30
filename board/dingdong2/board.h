@@ -38,6 +38,7 @@
 #define CONFIG_USB_PD_NO_VBUS_DETECT
 #define CONFIG_USB_PD_LOGGING
 #define CONFIG_USB_PD_LOG_SIZE 256
+#define CONFIG_CMD_AUX
 #undef CONFIG_WATCHDOG_HELP
 #undef CONFIG_LID_SWITCH
 #undef CONFIG_TASK_PROFILING
@@ -60,6 +61,8 @@
 /* ADC signal */
 enum adc_channel {
 	ADC_CH_CC1_PD = 0,
+	ADC_CH_AUX_N,
+	ADC_CH_AUX_P,
 	/* Number of ADC channels */
 	ADC_CH_COUNT
 };
