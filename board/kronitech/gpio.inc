@@ -11,9 +11,11 @@
 //    port 1: DFP / receptacle
 //-------------------------------------------------------------------------------------
 /* CC Signal RX/TX Port 0 */
+#ifndef CONFIG_BIZ_EMU_HOST
 GPIO(USB_P0_CC_PD,           A, 0,  GPIO_ANALOG,   NULL)
 GPIO(USB_P0_CC_TX_DATA,      B, 4,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_P0_CC_TX_EN,        B, 0,  GPIO_OUT_LOW,  NULL)
+#endif
 GPIO(USB_CCRX_REF,           A, 1,  GPIO_ANALOG,   NULL)
 GPIO(USB_CCRX_REF_OUT,       A, 4,  GPIO_ANALOG,   NULL)
 
@@ -32,6 +34,7 @@ GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW,  NULL)
 // CC Port 0
 //-------------------------------------------------------------------------------------
 /* USB/DP mux signals */
+#ifndef CONFIG_BIZ_EMU_HOST
 GPIO(USB_P0_DP_SS_LANE,      B, 7,  GPIO_OUT_LOW,  NULL)
 GPIO(USB_P0_SBU_ENABLE,      A, 15, GPIO_OUT_LOW,  NULL)
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
@@ -46,6 +49,7 @@ GPIO(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
 GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
 GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
 GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Consumer */
+#endif
 
 //-------------------------------------------------------------------------------------
 // CC Port 1

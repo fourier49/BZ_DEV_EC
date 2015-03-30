@@ -129,12 +129,14 @@ static inline void pd_tx_spi_reset(int port)
 static inline void pd_tx_enable(int port, int polarity)
 {
 	if (port == 0) {
+#ifndef CONFIG_BIZ_EMU_HOST
 		/* put SPI function on TX pin */
 		/* PB4 is SPI1 MISO */
 		gpio_set_alternate_function(GPIO_B, 0x0010, 0);
 
 		/* set the low level reference */
 		gpio_set_level(GPIO_USB_P0_CC_TX_EN, 1);
+#endif
 #ifdef CONFIG_BIZ_DUAL_CC
 	} else {
 		/* set the CC1/CC2 orientation */
@@ -154,6 +156,7 @@ static inline void pd_tx_enable(int port, int polarity)
 static inline void pd_tx_disable(int port, int polarity)
 {
 	if (port == 0) {
+#ifndef CONFIG_BIZ_EMU_HOST
 		/* output low on SPI TX to disable the FET */
 		/* PB4 is SPI1 MISO */
 		STM32_GPIO_MODER(GPIO_B) = (STM32_GPIO_MODER(GPIO_B)
@@ -162,6 +165,7 @@ static inline void pd_tx_disable(int port, int polarity)
 
 		/* put the low level reference in Hi-Z */
 		gpio_set_level(GPIO_USB_P0_CC_TX_EN, 0);
+#endif
 #ifdef CONFIG_BIZ_DUAL_CC
 	} else {
 		/* output low on SPI TX to disable the FET */
