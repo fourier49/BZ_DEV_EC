@@ -349,15 +349,15 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 	enum gpio_signal hpd = PORT_TO_HPD(port);
 	cur_lvl = gpio_get_level(hpd);
 
+	if (mfp)
+		dp_flags[port] |= DP_FLAGS_MFUNC_PREF;
+
 	/* Its initial DP status message prior to config */
 	if (!(dp_flags[port] & DP_FLAGS_DP_ON)) {
 		if (lvl)
 			dp_flags[port] |= DP_FLAGS_HPD_HI_PENDING;
 		return 1;
 	}
-	if (mfp)
-		dp_flags[port] |= DP_FLAGS_MFUNC_PREF;
-
 	if (irq & cur_lvl) {
 		gpio_set_level(hpd, 0);
 		/* 250 usecs is minimum, 2msec is max */
