@@ -175,7 +175,11 @@ int main(void)
 	printf("\r\nDFU-Detect=%d\r\n", get_status_req);
   // jump to user application	
   if (get_status_req == 0)
-  { /* Jump to user application */
+  {
+	/*disable and clear usb interrupt*/
+	printf("\r\nStop USB device and wait for 1 seconds\r\n");
+	USBD_DeInit(&USB_Device_dev); 
+	/* Jump to user application */
 	USB_BSP_mDelay(1000); // delay 1 sec
     JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
 		printf("JumpAddress: %x\r\n", JumpAddress);

@@ -112,7 +112,13 @@ void USBD_Init(USB_CORE_HANDLE *pdev,
 USBD_Status USBD_DeInit(USB_CORE_HANDLE *pdev)
 {
   /* Software Init */
-  
+#ifdef INTERNAL_PULLUP
+  DCD_DevDisconnect(pdev);
+#else
+ USB_BSP_DevDisconnect(pdev);
+#endif
+	
+  DCD_StopDevice(pdev);
   return USBD_OK;
 }
 
