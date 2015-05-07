@@ -17,6 +17,7 @@
 
 /* Optional features */
 #define CONFIG_ADC
+#undef  CONFIG_ADC_WATCHDOG
 #define CONFIG_BOARD_PRE_INIT
 #define CONFIG_CHARGE_MANAGER
 #define CONFIG_CHARGE_RAMP
@@ -28,6 +29,7 @@
 #define CONFIG_CHARGER_INPUT_CURRENT PWM_0_MA
 #undef  CONFIG_CMD_IDLE_STATS
 #undef  CONFIG_CMD_SHMEM
+#undef  CONFIG_CMD_TIMERINFO
 #define CONFIG_COMMON_GPIO_SHORTNAMES
 #undef  CONFIG_CONSOLE_CMDHELP
 #undef  CONFIG_CONSOLE_HISTORY
@@ -51,16 +53,24 @@
 #define CONFIG_USB_PD_CUSTOM_VDM
 #define CONFIG_USB_PD_DUAL_ROLE
 #define CONFIG_USB_PD_FLASH_ERASE_CHECK
+#define CONFIG_USB_PD_HOST_EVENT_ON_POWER_CHANGE
 #define CONFIG_USB_PD_INTERNAL_COMP
 #define CONFIG_USB_PD_LOGGING
 #define CONFIG_USB_PD_LOG_SIZE 512
 #define CONFIG_USB_SWITCH_PI3USB9281
 #undef  CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO
 #define CONFIG_USB_SWITCH_PI3USB9281_MUX_GPIO GPIO_USB_C_BC12_SEL
+#define CONFIG_USBC_SS_MUX_DFP_ONLY
 #define CONFIG_USBC_SS_MUX
 #define CONFIG_USBC_VCONN
+#define CONFIG_USBC_VCONN_SWAP
 #define CONFIG_VBOOT_HASH
 #undef  CONFIG_WATCHDOG_HELP
+
+/* Use PSTATE embedded in the RO image, not in its own erase block */
+#undef  CONFIG_FLASH_PSTATE_BANK
+#undef  CONFIG_FW_PSTATE_SIZE
+#define CONFIG_FW_PSTATE_SIZE 0
 
 /* I2C ports configuration */
 #define I2C_PORT_MASTER 1
@@ -129,9 +139,6 @@ int board_get_battery_soc(void);
 
 /* Send host event to AP */
 void pd_send_host_event(int mask);
-
-/* Update the state of the USB data switches */
-void set_usb_switches(int port, int open);
 
 #endif /* !__ASSEMBLER__ */
 

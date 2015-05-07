@@ -41,18 +41,16 @@
 
 /* Specify type of accelerometers attached. */
 #undef CONFIG_ACCEL_KXCJ9
+#undef CONFIG_ACCELGYRO_LSM6DS0
 
 /* Compile chip support for analog-to-digital convertor */
 #undef CONFIG_ADC
 
-/*
- * ADC module has certain clock requirement. If this is defined, the ADC module
- * should call clock_enable_module() to configure clock for ADC.
- */
-#undef CONFIG_ADC_CLOCK
-
 /* ADC sample time selection. The value is chip-dependent. */
 #undef CONFIG_ADC_SAMPLE_TIME
+
+/* Include the ADC analog watchdog feature in the ADC code */
+#define CONFIG_ADC_WATCHDOG
 
 /*
  * Some ALS modules may be connected to the EC. We need the command, and
@@ -81,15 +79,18 @@
 /* Battery config */
 
 /*
- * Compile battery-specific code.  Choose at most one.
+ * Compile battery-specific code.
  *
  * Note that some boards have their own unique battery constants / functions.
  * In this case, those are provided in board/(boardname)/battery.c, and none of
  * these are defined.
  */
-#undef CONFIG_BATTERY_BQ20Z453	/* BQ20Z453 battery used on some ARM laptops */
-#undef CONFIG_BATTERY_BQ27541	/* BQ27541 battery */
-#undef CONFIG_BATTERY_LINK	/* Battery used on Link */
+#undef CONFIG_BATTERY_BQ20Z453
+#undef CONFIG_BATTERY_BQ27541
+#undef CONFIG_BATTERY_BQ27621
+#undef CONFIG_BATTERY_LINK
+#undef CONFIG_BATTERY_RYU
+#undef CONFIG_BATTERY_SAMUS
 
 /* Compile mock battery support; used by tests. */
 #undef CONFIG_BATTERY_MOCK
@@ -238,8 +239,19 @@
 #undef CONFIG_CHARGER_BQ24715
 #undef CONFIG_CHARGER_BQ24725
 #undef CONFIG_CHARGER_BQ24738
+#undef CONFIG_CHARGER_BQ24770
 #undef CONFIG_CHARGER_BQ24773
+#undef CONFIG_CHARGER_BQ25890
+#undef CONFIG_CHARGER_BQ25892
+#undef CONFIG_CHARGER_BQ25895
 #undef CONFIG_CHARGER_TPS65090  /* Note: does not use CONFIG_CHARGER */
+
+/*
+ * BQ2589x 5V boost current limit and voltage.
+ * Should be the combination of BQ2589X_BOOSTV_MV(voltage) and
+ * BQ2589X_BOOST_LIM_xxxMA.
+ */
+#undef CONFIG_CHARGER_BQ2589X_BOOST
 
 /*
  * Board specific charging current limit, in mA.  If defined, the charge state
@@ -375,6 +387,7 @@
 #undef CONFIG_CMD_SPI_FLASH
 #undef CONFIG_CMD_STACKOVERFLOW
 #undef CONFIG_CMD_TASKREADY
+#define CONFIG_CMD_TIMERINFO
 #define CONFIG_CMD_TYPEC
 #undef CONFIG_CMD_USB_PD_PE
 
@@ -590,12 +603,24 @@
 #undef CONFIG_FLASH_PROTECT_NEXT_BOOT
 
 /*
- * Use a bank of flash to store its persistent write protect state.  This
- * allows ECs with internal flash to emulate something closer to a SPI flash
- * write protect register.  If this is not defined, write protect state is
- * maintained solely by the physical flash driver.
+ * Store persistent write protect for the flash inside the flash data itself.
+ * This allows ECs with internal flash to emulate something closer to a SPI
+ * flash write protect register.  If this is not defined, write protect state
+ * is maintained solely by the physical flash driver.
  */
 #define CONFIG_FLASH_PSTATE
+
+/*
+ * Store the pstate data in its own dedicated bank of flash.  This allows
+ * disabling the protect-RO-at-boot flag without rewriting the RO firmware,
+ * but costs a bank of flash.
+ *
+ * If this is not defined, the pstate data is stored inside the RO firmware
+ * image itself.  This is more space-efficient, but the only way to clear the
+ * flag once it's set is to rewrite the RO firmware (after removing the WP
+ * screw, of course).
+ */
+#define CONFIG_FLASH_PSTATE_BANK
 
 #undef CONFIG_FLASH_SIZE
 #undef CONFIG_FLASH_WRITE_IDEAL_SIZE
@@ -633,10 +658,13 @@
 
 /*****************************************************************************/
 /* Motion sensor based gesture recognition information */
+/* These all require HAS_TASK_MOTIONSENSE to work */
+
+/* Do we want to detect gestures? */
 #undef CONFIG_GESTURE_DETECTION
-#ifndef CONFIG_GESTURE_DETECTION
+
 /* Which sensor to look for gesture recognition */
-#undef CONFIG_SENSOR_BATTERY_TAP
+#undef CONFIG_GESTURE_SENSOR_BATTERY_TAP
 /* Sensor sampling interval for gesture recognition */
 #undef CONFIG_GESTURE_SAMPLING_INTERVAL_MS
 /*
@@ -655,23 +683,20 @@
 #undef CONFIG_GESTURE_TAP_MIN_INTERSTICE_T
 #undef CONFIG_GESTURE_TAP_MAX_INTERSTICE_T
 
-#endif
-
+/* Do we want to detect the lid angle? */
 #undef CONFIG_LID_ANGLE
-#ifndef CONFIG_LID_ANGLE
-#undef CONFIG_SENSOR_BASE
-#undef CONFIG_SENSOR_LID
 
+/* Which sensor is located on the base? */
+#undef CONFIG_LID_ANGLE_SENSOR_BASE
+/* Which sensor is located on the lid? */
+#undef CONFIG_LID_ANGLE_SENSOR_LID
 /*
  * Allows using the lid angle measurement to determine if key scanning should
  * be enabled or disabled when chipset is suspended.
  */
 #undef CONFIG_LID_ANGLE_KEY_SCAN
 
-#endif
-
 /*****************************************************************************/
-
 /*
  * Support the host asking the EC about the status of the most recent host
  * command.
@@ -770,6 +795,16 @@
 #undef CONFIG_I2C_SCL_GATE_ADDR
 #undef CONFIG_I2C_SCL_GATE_GPIO
 
+/*
+ * I2C multi-port controller.
+ *
+ * If CONFIG_I2C_MULTI_PORT_CONTROLLER is defined, a single on-chip I2C
+ * controller may have multiple I2C ports attached. Therefore, I2c operations
+ * must lock the controller (not just the port) to prevent hardware access
+ * conflicts.
+ */
+#undef CONFIG_I2C_MULTI_PORT_CONTROLLER
+
 /*****************************************************************************/
 /* Current/Power monitor */
 
@@ -801,6 +836,12 @@
  * costing power due to the pull-up resistor in the Silego.
  */
 #undef CONFIG_KEYBOARD_COL2_INVERTED
+
+/*
+ * Config KSO to start from a different KSO pin. This is to allow some chips
+ * to use alternate functions on KSO pins.
+ */
+#define CONFIG_KEYBOARD_KSO_BASE 0
 
 /* Enable extra debugging output from keyboard modules */
 #undef CONFIG_KEYBOARD_DEBUG
@@ -962,6 +1003,14 @@
 
 /*****************************************************************************/
 
+/*
+ * Enable polling at boot by port 80 task.
+ * Ignored if port 80 is handled by interrupt
+ */
+#undef CONFIG_PORT80_TASK_EN
+
+/*****************************************************************************/
+
 /* Compile common code to support power button debouncing */
 #undef CONFIG_POWER_BUTTON
 
@@ -1038,6 +1087,15 @@
 
 /* Support SPI flash */
 #undef CONFIG_SPI_FLASH
+
+/* Support W25Q64 SPI flash */
+#undef CONFIG_SPI_FLASH_W25Q64
+
+/* Support W25X40 SPI flash */
+#undef CONFIG_SPI_FLASH_W25X40
+
+/* SPI flash part supports SR2 register */
+#undef CONFIG_SPI_FLASH_HAS_SR2
 
 /* Size (bytes) of SPI flash memory */
 #undef CONFIG_SPI_FLASH_SIZE
@@ -1202,7 +1260,7 @@
 #undef CONFIG_USB_PD_ALT_MODE_DFP
 
 /* Check if max voltage request is allowed before each request */
-#undef CONIFG_USB_PD_CHECK_MAX_REQUEST_ALLOWED
+#undef CONFIG_USB_PD_CHECK_MAX_REQUEST_ALLOWED
 
 /* Default state of PD communication enabled flag */
 #define CONFIG_USB_PD_COMM_ENABLED 1
@@ -1219,9 +1277,12 @@
 /* Check whether PD is the sole power source before flash erase operation */
 #undef CONFIG_USB_PD_FLASH_ERASE_CHECK
 
+/* Send host event when power changes */
+#undef CONFIG_USB_PD_HOST_EVENT_ON_POWER_CHANGE
+
 /* HW & SW version for alternate mode discover identity response (4bits each) */
-#undef CONFIG_USB_PD_IDENTITY_HW_ID
-#undef CONFIG_USB_PD_IDENTITY_SW_ID
+#undef CONFIG_USB_PD_IDENTITY_HW_VERS
+#undef CONFIG_USB_PD_IDENTITY_SW_VERS
 
 /* USB PD MCU slave address for host commands */
 #define CONFIG_USB_PD_I2C_SLAVE_ADDR 0x3c
@@ -1250,11 +1311,20 @@
 /* Support for USB type-c superspeed mux */
 #undef CONFIG_USBC_SS_MUX
 
+/*
+ * Only configure USB type-c superspeed mux when DFP (for chipsets that
+ * don't support being a UFP)
+ */
+#undef CONFIG_USBC_SS_MUX_DFP_ONLY
+
 /* Support v1.1 type-C connection state machine */
 #undef CONFIG_USBC_BACKWARDS_COMPATIBLE_DFP
 
 /* Support for USB type-c vconn. Not needed for captive cables. */
 #undef CONFIG_USBC_VCONN
+
+/* Support VCONN swap */
+#undef CONFIG_USBC_VCONN_SWAP
 
 /* USB Binary device Object Store support */
 #undef CONFIG_USB_BOS
@@ -1266,6 +1336,12 @@
 
 /* Compile chip support for the USB device controller */
 #undef CONFIG_USB
+
+/* USB device buffers and descriptors */
+#undef CONFIG_USB_RAM_ACCESS_SIZE
+#undef CONFIG_USB_RAM_ACCESS_TYPE
+#undef CONFIG_USB_RAM_BASE
+#undef CONFIG_USB_RAM_SIZE
 
 /* Disable automatic connection of USB peripheral */
 #undef CONFIG_USB_INHIBIT_CONNECT

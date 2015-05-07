@@ -72,6 +72,7 @@ static int pd_find_pdo_index(int cnt, uint32_t *src_caps, int max_mv)
 			uw = 250000 * (src_caps[i] & 0x3FF);
 		} else {
 			ma = (src_caps[i] & 0x3FF) * 10;
+			ma = MIN(ma, PD_MAX_CURRENT_MA);
 			uw = ma * mv;
 		}
 #ifdef PD_PREFER_LOW_VOLTAGE
@@ -174,6 +175,17 @@ void pd_set_max_voltage(unsigned mv)
 unsigned pd_get_max_voltage(void)
 {
 	return max_request_mv;
+}
+
+int pd_charge_from_device(uint16_t vid, uint16_t pid)
+{
+	/* TODO: rewrite into table if we get more of these */
+	/*
+	 * White-list Apple charge-through accessory since it doesn't set
+	 * externally powered bit, but we still need to charge from it when
+	 * we are a sink.
+	 */
+	return (vid == USB_VID_APPLE && (pid == 0x1012 || pid == 0x1013));
 }
 #endif /* CONFIG_USB_PD_DUAL_ROLE */
 
@@ -388,11 +400,58 @@ static void dfp_consume_attention(int port, uint32_t *payload)
 	int opos = PD_VDO_OPOS(payload[0]);
 	struct svdm_amode_data *modep = get_modep(port, svid);
 
-	if (!validate_mode_request(modep, svid, opos))
+	if (!modep || !validate_mode_request(modep, svid, opos))
 		return;
 
 	if (modep->fx->attention)
 		modep->fx->attention(port, payload);
+}
+
+/*
+ * This algorithm defaults to choosing higher pin config over lower ones.  Pin
+ * configs are organized in pairs with the following breakdown.
+ *
+ *  NAME | SIGNALING | OUTPUT TYPE | MULTI-FUNCTION | PIN CONFIG
+ * -------------------------------------------------------------
+ *  A    |  USB G2   |  ?          | no             | 00_0001
+ *  B    |  USB G2   |  ?          | yes            | 00_0010
+ *  C    |  DP       |  CONVERTED  | no             | 00_0100
+ *  D    |  PD       |  CONVERTED  | yes            | 00_1000
+ *  E    |  DP       |  DP         | no             | 01_0000
+ *  F    |  PD       |  DP         | yes            | 10_0000
+ *
+ * if UFP has NOT asserted multi-function preferred code masks away B/D/F
+ * leaving only A/C/E.  For single-output dongles that should leave only one
+ * possible pin config depending on whether its a converter DP->(VGA|HDMI) or DP
+ * output.  If someone creates a multi-output dongle presumably they would need
+ * to either offer different mode capabilities depending upon connection type or
+ * the DFP would need additional system policy to expose those options.
+ */
+int pd_dfp_dp_get_pin_mode(int port, uint32_t status)
+{
+	struct svdm_amode_data *modep = get_modep(port, USB_SID_DISPLAYPORT);
+	uint32_t mode_caps;
+	uint32_t pin_caps;
+	if (!modep)
+		return 0;
+
+	mode_caps = modep->data->mode_vdo[modep->opos - 1];
+
+	/* TODO(crosbug.com/p/39656) revisit with DFP that can be a sink */
+	pin_caps = PD_VDO_MODE_DP_SRCP(mode_caps);
+
+	/* if don't want multi-function then ignore those pin configs */
+	if (!PD_VDO_DPSTS_MF_PREF(status))
+		pin_caps &= ~MODE_DP_PIN_MF_MASK;
+
+	/* TODO(crosbug.com/p/39656) revisit if DFP drives USB Gen 2 signals */
+	pin_caps &= ~MODE_DP_PIN_BR2_MASK;
+
+	/* get_next_bit returns undefined for zero */
+	if (!pin_caps)
+		return 0;
+
+	return 1 << get_next_bit(&pin_caps);
 }
 
 int pd_dfp_exit_mode(int port, uint16_t svid, int opos)
@@ -421,7 +480,7 @@ int pd_dfp_exit_mode(int port, uint16_t svid, int opos)
 	 * multiple modes on one SVID.
 	 */
 	modep = get_modep(port, svid);
-	if (!validate_mode_request(modep, svid, opos))
+	if (!modep || !validate_mode_request(modep, svid, opos))
 		return 0;
 
 	/* call DFPs exit function */
@@ -434,6 +493,11 @@ int pd_dfp_exit_mode(int port, uint16_t svid, int opos)
 uint16_t pd_get_identity_vid(int port)
 {
 	return PD_IDH_VID(pe[port].identity[0]);
+}
+
+uint16_t pd_get_identity_pid(int port)
+{
+	return PD_PRODUCT_PID(pe[port].identity[2]);
 }
 
 #ifdef CONFIG_CMD_USB_PD_PE
@@ -594,24 +658,30 @@ int pd_svdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 			}
 			break;
 		case CMD_ENTER_MODE:
-			if (!modep->opos)
-				pd_dfp_enter_mode(port, 0, 0);
-			if (modep->opos) {
-				rsize = modep->fx->status(port, payload);
-				payload[0] |= PD_VDO_OPOS(modep->opos);
+			if (!modep) {
+				rsize = 0;
+			} else {
+				if (!modep->opos)
+					pd_dfp_enter_mode(port, 0, 0);
+
+				if (modep->opos) {
+					rsize = modep->fx->status(port,
+								  payload);
+					payload[0] |= PD_VDO_OPOS(modep->opos);
+				}
 			}
 			break;
 		case CMD_DP_STATUS:
 			/* DP status response & UFP's DP attention have same
 			   payload */
 			dfp_consume_attention(port, payload);
-			if (modep->opos)
+			if (modep && modep->opos)
 				rsize = modep->fx->config(port, payload);
 			else
 				rsize = 0;
 			break;
 		case CMD_DP_CONFIG:
-			if (modep->opos && modep->fx->post_config)
+			if (modep && modep->opos && modep->fx->post_config)
 				modep->fx->post_config(port);
 			/* no response after DFPs ack */
 			rsize = 0;
@@ -680,7 +750,7 @@ int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 void pd_usb_billboard_deferred(void)
 {
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP) \
-	&& !defined(CONFIG_USB_PD_SIMPLE_DFP)
+	&& !defined(CONFIG_USB_PD_SIMPLE_DFP) && defined(CONFIG_USB_BOS)
 
 	/*
 	 * TODO(tbroch)

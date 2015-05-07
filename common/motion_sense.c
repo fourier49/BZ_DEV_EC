@@ -97,6 +97,11 @@ static void motion_sense_suspend(void)
 
 	for (i = 0; i < motion_sensor_count; i++) {
 		sensor = &motion_sensors[i];
+
+		/* if it is in s5, don't enter suspend */
+		if (sensor->active == SENSOR_ACTIVE_S5)
+			continue;
+
 		sensor->active = SENSOR_ACTIVE_S3;
 
 		/* Saving power if the sensor is not active in S3 */
@@ -451,7 +456,7 @@ static int host_cmd_motion_sense(struct host_cmd_handler_args *args)
 		if (sensor == NULL)
 			return EC_RES_INVALID_PARAM;
 
-		/* Set new data rate if the data arg has a value. */
+		/* Set new range if the data arg has a value. */
 		if (in->sensor_range.data != EC_MOTION_SENSE_NO_VALUE) {
 			if (sensor->drv->set_range(sensor,
 						in->sensor_range.data,

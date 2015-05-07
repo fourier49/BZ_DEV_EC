@@ -138,9 +138,16 @@ static inline void pd_set_host_mode(int port, int enable)
 		/* High-Z is used for host mode. */
 		gpio_set_level(GPIO_USBC_CC1_DEVICE_ODL, 1);
 		gpio_set_level(GPIO_USBC_CC2_DEVICE_ODL, 1);
+		/* Set 3.3V for Rp pull-up */
+		gpio_set_flags(GPIO_USBC_CC_PUEN1, GPIO_OUT_HIGH);
+		gpio_set_flags(GPIO_USBC_CC_PUEN2, GPIO_OUT_HIGH);
 	} else {
 		/* Kill VBUS power supply */
-		gpio_set_level(GPIO_USBC_5V_EN, 0);
+		charger_enable_otg_power(0);
+		gpio_set_level(GPIO_CHGR_OTG, 0);
+		/* Remove Rp pull-up by putting the high side in Hi-Z */
+		gpio_set_flags(GPIO_USBC_CC_PUEN1, GPIO_INPUT);
+		gpio_set_flags(GPIO_USBC_CC_PUEN2, GPIO_INPUT);
 		/* Pull low for device mode. */
 		gpio_set_level(GPIO_USBC_CC1_DEVICE_ODL, 0);
 		gpio_set_level(GPIO_USBC_CC2_DEVICE_ODL, 0);
@@ -172,7 +179,7 @@ static inline void pd_config_init(int port, uint8_t power_role)
 	pd_tx_init();
 
 	/* Reset mux ... for NONE polarity doesn't matter */
-	board_set_usb_mux(port, TYPEC_MUX_NONE, 0);
+	board_set_usb_mux(port, TYPEC_MUX_NONE, USB_SWITCH_DISCONNECT, 0);
 
 	gpio_set_level(GPIO_USBC_VCONN1_EN_L, 1);
 	gpio_set_level(GPIO_USBC_VCONN2_EN_L, 1);
@@ -198,8 +205,10 @@ static inline int pd_snk_is_vbus_provided(int port)
 	return gpio_get_level(GPIO_CHGR_ACOK);
 }
 
-/* Standard-current DFP : no-connect voltage is 1.55V */
-#define PD_SRC_VNC 1550 /* mV */
+/* 1.5A DFP : no-connect voltage threshold is 1.60V */
+#define PD_SRC_VNC 1600 /* mV */
+/* 1.5A DFP : Ra/Rd detection voltage threshold is 400mV */
+#define PD_SRC_RD_THRESHOLD 400 /* mV */
 
 /* UFP-side : threshold for DFP connection detection */
 #define PD_SNK_VA   200 /* mV */
@@ -207,15 +216,15 @@ static inline int pd_snk_is_vbus_provided(int port)
 /* start as a sink in case we have no other power supply/battery */
 #define PD_DEFAULT_STATE PD_STATE_SNK_DISCONNECTED
 
-/* delay for the voltage transition on the power supply, chip max is 16us */
-#define PD_POWER_SUPPLY_TURN_ON_DELAY  20000 /* us */
+/* delay for the voltage transition on the power supply, BQ25x spec is 30ms */
+#define PD_POWER_SUPPLY_TURN_ON_DELAY  40000 /* us */
 #define PD_POWER_SUPPLY_TURN_OFF_DELAY 20000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 10000
 #define PD_MAX_POWER_MW       24000
 #define PD_MAX_CURRENT_MA     3000
-#define PD_MAX_VOLTAGE_MV     20000
+#define PD_MAX_VOLTAGE_MV     12000
 
 /* The lower the input voltage, the higher the power efficiency. */
 #define PD_PREFER_LOW_VOLTAGE

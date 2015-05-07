@@ -78,6 +78,16 @@ test_mockable int main(void)
 	flash_pre_init();
 #endif
 
+#if defined(CONFIG_CASE_CLOSED_DEBUG)
+	/*
+	 * If the device is locked we assert PD_NO_DEBUG, preventing the EC
+	 * from interfering with the AP's access to the SPI flash.
+	 * The PD_NO_DEBUG signal is latched in hardware, so changing this
+	 * GPIO later has no effect.
+	 */
+	gpio_set_level(GPIO_PD_DISABLE_DEBUG, system_is_locked());
+#endif
+
 	/* Set the CPU clocks / PLLs.  System is now running at full speed. */
 	clock_init();
 

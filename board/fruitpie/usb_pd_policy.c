@@ -117,11 +117,11 @@ void pd_execute_data_swap(int port, int data_role)
 	/* Do nothing */
 }
 
-void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+void pd_check_pr_role(int port, int pr_role, int flags)
 {
 }
 
-void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
+void pd_check_dr_role(int port, int dr_role, int flags)
 {
 }
 /* ----------------- Vendor Defined Messages ------------------ */
@@ -198,7 +198,8 @@ static int svdm_dp_status(int port, uint32_t *payload)
 
 static int svdm_dp_config(int port, uint32_t *payload)
 {
-	board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
+	board_set_usb_mux(port, TYPEC_MUX_DP, USB_SWITCH_CONNECT,
+			  pd_get_polarity(port));
 	dp_on = 1;
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1, CMD_DP_CONFIG);
 	payload[1] = VDO_DP_CFG(MODE_DP_PIN_E, /* sink pins */

@@ -7,17 +7,110 @@
 #define __CROS_EC_REGISTERS_H
 
 #include "common.h"
-#include "gc_regdefs.h"
+#if defined(CHIP_VARIANT_CR50_FPGA)
+#include "cr50_fpga_regdefs.h"
+#define PCLK_FREQ  30000000
+#elif defined(CHIP_VARIANT_CR50_A1)
+#include "cr50_a1_regdefs.h"
+#define PCLK_FREQ  24000000
+#else
+#error "Unsupported CR50 chip variant"
+#endif
+
 #include "util.h"
 
+/* Constants for setting baud rate */
+#define DEFAULT_UART_FREQ 1000000
+#define UART_NCO_WIDTH 16
+
+/*
+ * Added Alias Module Family Base Address to 0-instance Module Base Address
+ * Simplify GBASE(mname) macro
+ */
+#define GC_MODULE_OFFSET         0x10000
+
+#define GC_AES_BASE_ADDR         GC_AES0_BASE_ADDR
+#define GC_CAMO_BASE_ADDR        GC_CAMO0_BASE_ADDR
+#define GC_FLASH_BASE_ADDR       GC_FLASH0_BASE_ADDR
+#define GC_GPIO_BASE_ADDR        GC_GPIO0_BASE_ADDR
+#define GC_I2C_BASE_ADDR         GC_I2C0_BASE_ADDR
+#define GC_I2CS_BASE_ADDR        GC_I2CS0_BASE_ADDR
+#define GC_RBOX_BASE_ADDR        GC_RBOX0_BASE_ADDR
+#define GC_RTC_BASE_ADDR         GC_RTC0_BASE_ADDR
+#define GC_SHA_BASE_ADDR         GC_SHA0_BASE_ADDR
+#define GC_SPI_BASE_ADDR         GC_SPI0_BASE_ADDR
+#define GC_SPS_BASE_ADDR         GC_SPS0_BASE_ADDR
+#define GC_SWDP_BASE_ADDR        GC_SWDP0_BASE_ADDR
+#define GC_TEMP_BASE_ADDR        GC_TEMP0_BASE_ADDR
+#define GC_TIMEHS_BASE_ADDR      GC_TIMEHS0_BASE_ADDR
+#define GC_TIMELS_BASE_ADDR      GC_TIMELS0_BASE_ADDR
+#define GC_TRNG_BASE_ADDR        GC_TRNG0_BASE_ADDR
+#define GC_UART_BASE_ADDR        GC_UART0_BASE_ADDR
+#define GC_USB_BASE_ADDR         GC_USB0_BASE_ADDR
+#define GC_WATCHDOG_BASE_ADDR    GC_WATCHDOG0_BASE_ADDR
+#define GC_XO_BASE_ADDR          GC_XO0_BASE_ADDR
+
+#define GBASE(mname)      \
+	GC_ ## mname ## _BASE_ADDR
+#define GOFFSET(mname, rname)  \
+	GC_ ## mname ## _ ## rname ## _OFFSET
+
+#define GREG32(mname, rname) \
+	REG32(GBASE(mname) + GOFFSET(mname, rname))
+#define GREG32_ADDR(mname, rname) \
+	REG32_ADDR(GBASE(mname) + GOFFSET(mname, rname))
+#define GWRITE(mname, rname, value) (GREG32(mname, rname) = (value))
+#define GREAD(mname, rname)	    GREG32(mname, rname)
+
+#define GFIELD_MASK(mname, rname, fname) \
+	GC_ ## mname ## _ ## rname ## _ ## fname ## _MASK
+
+#define GFIELD_LSB(mname, rname, fname)  \
+	GC_ ## mname ## _ ## rname ## _ ## fname ## _LSB
+
+#define GREAD_FIELD(mname, rname, fname) \
+	((GREG32(mname, rname) & GFIELD_MASK(mname, rname, fname)) \
+		>> GFIELD_LSB(mname, rname, fname))
+
+#define GWRITE_FIELD(mname, rname, fname, fval) \
+	(GREG32(mname, rname) = \
+	((GREG32(mname, rname) & (~GFIELD_MASK(mname, rname, fname))) | \
+	(((fval) << GFIELD_LSB(mname, rname, fname)) & \
+		GFIELD_MASK(mname, rname, fname))))
+
+
+#define GBASE_I(mname, i)     (GBASE(mname) + i*GC_MODULE_OFFSET)
+
+#define GREG32_I(mname, i, rname) \
+		REG32(GBASE_I(mname, i) + GOFFSET(mname, rname))
+
+#define GREG32_ADDR_I(mname, i, rname) \
+		REG32_ADDR(GBASE_I(mname, i) + GOFFSET(mname, rname))
+
+#define GWRITE_I(mname, i, rname, value) (GREG32_I(mname, i, rname) = (value))
+#define GREAD_I(mname, i, rname)	        GREG32_I(mname, i, rname)
+
+#define GREAD_FIELD_I(mname, i, rname, fname) \
+	((GREG32_I(mname, i, rname) & GFIELD_MASK(mname, rname, fname)) \
+		>> GFIELD_LSB(mname, rname, fname))
+
+#define GWRITE_FIELD_I(mname, i, rname, fname, fval) \
+	(GREG32_I(mname, i, rname) = \
+	((GREG32_I(mname, i, rname) & (~GFIELD_MASK(mname, rname, fname))) | \
+	(((fval) << GFIELD_LSB(mname, rname, fname)) & \
+		GFIELD_MASK(mname, rname, fname))))
+
 /* Replace masked bits with val << lsb */
-#define REG_WRITE_MLV(reg, mask, lsb, val) reg = ((reg & ~mask) | ((val << lsb) & mask))
+#define REG_WRITE_MLV(reg, mask, lsb, val) \
+		(reg = ((reg & ~mask) | ((val << lsb) & mask)))
 
 /* Revision generated from the register definitions */
 #define GC_REVISION_STR STRINGIFY(GC_REVISION)
 /* Revision registers */
-#define GR_SWDP_BUILD_DATE  REG32(GC_SWDP0_BASE_ADDR + GC_SWDP_BUILD_DATE_OFFSET)
-#define GR_SWDP_BUILD_TIME  REG32(GC_SWDP0_BASE_ADDR + GC_SWDP_BUILD_TIME_OFFSET)
+#define GR_SWDP_BUILD_DATE  \
+	REG32(GC_SWDP0_BASE_ADDR + GC_SWDP_BUILD_DATE_OFFSET)
+#define GR_SWDP_BUILD_TIME  \
+	REG32(GC_SWDP0_BASE_ADDR + GC_SWDP_BUILD_TIME_OFFSET)
 
 /* Power Management Unit */
 #define GR_PMU_REG(off)               REG32(GC_PMU_BASE_ADDR + (off))
@@ -102,7 +195,6 @@ static inline int x_uart_addr(int ch, int offset)
 #define GR_UART_ISTATECLR(ch)         X_UARTREG(ch, GC_UART_ISTATECLR_OFFSET)
 #define GR_UART_FIFO(ch)              X_UARTREG(ch, GC_UART_FIFO_OFFSET)
 #define GR_UART_RFIFO(ch)             X_UARTREG(ch, GC_UART_RFIFO_OFFSET)
-
 
 /* GPIO port naming scheme left over from the LM4. Must maintain tradition! */
 #define GPIO_0 0
@@ -266,5 +358,151 @@ static inline int x_timehs_addr(unsigned int module, unsigned int timer,
 #define GR_XO_OSC_XTL_FSM_CFG         REG32(GC_XO0_BASE_ADDR + GC_XO_OSC_XTL_FSM_CFG_OFFSET)
 #define GR_XO_OSC_SETHOLD             REG32(GC_XO0_BASE_ADDR + GC_XO_OSC_SETHOLD_OFFSET)
 #define GR_XO_OSC_CLRHOLD             REG32(GC_XO0_BASE_ADDR + GC_XO_OSC_CLRHOLD_OFFSET)
+
+/* USB device controller */
+#define GR_USB_REG(off)               REG32(GC_USB0_BASE_ADDR + (off))
+#define GR_USB_GAHBCFG                GR_USB_REG(GC_USB_GAHBCFG_OFFSET)
+#define GR_USB_GUSBCFG                GR_USB_REG(GC_USB_GUSBCFG_OFFSET)
+#define GR_USB_GRSTCTL                GR_USB_REG(GC_USB_GRSTCTL_OFFSET)
+#define GR_USB_GINTSTS                GR_USB_REG(GC_USB_GINTSTS_OFFSET)
+#define GR_USB_GINTMSK                GR_USB_REG(GC_USB_GINTMSK_OFFSET)
+#define GR_USB_GRXSTSR                GR_USB_REG(GC_USB_GRXSTSR_OFFSET)
+#define GR_USB_GRXSTSP                GR_USB_REG(GC_USB_GRXSTSP_OFFSET)
+#define GR_USB_GRXFSIZ                GR_USB_REG(GC_USB_GRXFSIZ_OFFSET)
+#define GR_USB_GNPTXFSIZ              GR_USB_REG(GC_USB_GNPTXFSIZ_OFFSET)
+#define GR_USB_GSNPSID                GR_USB_REG(GC_USB_GSNPSID_OFFSET)
+#define GR_USB_GHWCFG1                GR_USB_REG(GC_USB_GHWCFG1_OFFSET)
+#define GR_USB_GHWCFG2                GR_USB_REG(GC_USB_GHWCFG2_OFFSET)
+#define GR_USB_GHWCFG3                GR_USB_REG(GC_USB_GHWCFG3_OFFSET)
+#define GR_USB_GHWCFG4                GR_USB_REG(GC_USB_GHWCFG4_OFFSET)
+#define GR_USB_GDFIFOCFG              GR_USB_REG(GC_USB_GDFIFOCFG_OFFSET)
+#define GR_USB_DIEPTXF(n)             GR_USB_REG(GC_USB_DIEPTXF1_OFFSET - 4 + (n)*4)
+#define GR_USB_DCFG                   GR_USB_REG(GC_USB_DCFG_OFFSET)
+#define GR_USB_DCTL                   GR_USB_REG(GC_USB_DCTL_OFFSET)
+#define GR_USB_DSTS                   GR_USB_REG(GC_USB_DSTS_OFFSET)
+#define GR_USB_DIEPMSK                GR_USB_REG(GC_USB_DIEPMSK_OFFSET)
+#define GR_USB_DOEPMSK                GR_USB_REG(GC_USB_DOEPMSK_OFFSET)
+#define GR_USB_DAINT                  GR_USB_REG(GC_USB_DAINT_OFFSET)
+#define GR_USB_DAINTMSK               GR_USB_REG(GC_USB_DAINTMSK_OFFSET)
+#define GR_USB_DTHRCTL                GR_USB_REG(GC_USB_DTHRCTL_OFFSET)
+#define GR_USB_DIEPEMPMSK             GR_USB_REG(GC_USB_DIEPEMPMSK_OFFSET)
+
+#define GR_USB_EPIREG(off, n)         GR_USB_REG(0x900 + (n) * 0x20 + (off))
+#define GR_USB_EPOREG(off, n)         GR_USB_REG(0xb00 + (n) * 0x20 + (off))
+#define GR_USB_DIEPCTL(n)             GR_USB_EPIREG(0x00, n)
+#define GR_USB_DIEPINT(n)             GR_USB_EPIREG(0x08, n)
+#define GR_USB_DIEPTSIZ(n)            GR_USB_EPIREG(0x10, n)
+#define GR_USB_DIEPDMA(n)             GR_USB_EPIREG(0x14, n)
+#define GR_USB_DTXFSTS(n)             GR_USB_EPIREG(0x18, n)
+#define GR_USB_DIEPDMAB(n)            GR_USB_EPIREG(0x1c, n)
+#define GR_USB_DOEPCTL(n)             GR_USB_EPOREG(0x00, n)
+#define GR_USB_DOEPINT(n)             GR_USB_EPOREG(0x08, n)
+#define GR_USB_DOEPTSIZ(n)            GR_USB_EPOREG(0x10, n)
+#define GR_USB_DOEPDMA(n)             GR_USB_EPOREG(0x14, n)
+#define GR_USB_DOEPDMAB(n)            GR_USB_EPOREG(0x1c, n)
+
+#define GAHBCFG_DMA_EN                (1 << GC_USB_GAHBCFG_DMAEN_LSB)
+#define GAHBCFG_GLB_INTR_EN           (1 << GC_USB_GAHBCFG_GLBLINTRMSK_LSB)
+#define GAHBCFG_HBSTLEN_INCR4         (3 << GC_USB_GAHBCFG_HBSTLEN_LSB)
+#define GAHBCFG_NP_TXF_EMP_LVL        (1 <<  GC_USB_GAHBCFG_NPTXFEMPLVL_LSB)
+
+#define GUSBCFG_TOUTCAL(n)            (((n) << GC_USB_GUSBCFG_TOUTCAL_LSB) & GC_USB_GUSBCFG_TOUTCAL_MASK)
+#define GUSBCFG_PHYSEL_HS             (0 << GC_USB_GUSBCFG_PHYSEL_LSB)
+#define GUSBCFG_PHYSEL_FS             (1 << GC_USB_GUSBCFG_PHYSEL_LSB)
+#define GUSBCFG_FSINTF_6PIN           (0 << GC_USB_GUSBCFG_FSINTF_LSB)
+#define GUSBCFG_FSINTF_3PIN           (1 << GC_USB_GUSBCFG_FSINTF_LSB)
+#define GUSBCFG_PHYIF16               (1 << GC_USB_GUSBCFG_PHYIF_LSB)
+#define GUSBCFG_PHYIF8                (0 << GC_USB_GUSBCFG_PHYIF_LSB)
+#define GUSBCFG_ULPI                  (1 << GC_USB_GUSBCFG_ULPI_UTMI_SEL_LSB)
+#define GUSBCFG_UTMI                  (0 << GC_USB_GUSBCFG_ULPI_UTMI_SEL_LSB)
+
+#define GRSTCTL_CSFTRST               (1 << GC_USB_GRSTCTL_CSFTRST_LSB)
+#define GRSTCTL_AHBIDLE               (1 << GC_USB_GRSTCTL_AHBIDLE_LSB)
+#define GRSTCTL_TXFFLSH               (1 << GC_USB_GRSTCTL_TXFFLSH_LSB)
+#define GRSTCTL_RXFFLSH               (1 << GC_USB_GRSTCTL_RXFFLSH_LSB)
+#define GRSTCTL_TXFNUM(n)             (((n) << GC_USB_GRSTCTL_TXFNUM_LSB) & GC_USB_GRSTCTL_TXFNUM_MASK)
+
+#define GINTSTS_RXFLVL                (1 << GC_USB_GINTSTS_RXFLVL_LSB)
+#define GINTSTS_SOF                   (1 << GC_USB_GINTSTS_SOF_LSB)
+#define GINTSTS_GOUTNAKEFF            (1 << GC_USB_GINTMSK_GOUTNAKEFFMSK_LSB)
+#define GINTSTS_GINNAKEFF             (1 << GC_USB_GINTMSK_GINNAKEFFMSK_LSB)
+#define GINTSTS_USBRST                (1 << GC_USB_GINTMSK_USBRSTMSK_LSB)
+#define GINTSTS_ENUMDONE              (1 << GC_USB_GINTMSK_ENUMDONEMSK_LSB)
+#define GINTSTS_IEPINT                (1 << GC_USB_GINTSTS_IEPINT_LSB)
+#define GINTSTS_OEPINT                (1 << GC_USB_GINTSTS_OEPINT_LSB)
+
+#define DCFG_DEVSPD_FS                (1 << GC_USB_DCFG_DEVSPD_LSB)
+#define DCFG_DEVSPD_FS48              (3 << GC_USB_DCFG_DEVSPD_LSB)
+#define DCFG_DEVADDR(a)               (((a) << GC_USB_DCFG_DEVADDR_LSB) & GC_USB_DCFG_DEVADDR_MASK)
+#define DCFG_DESCDMA                  (1 << GC_USB_DCFG_DESCDMA_LSB)
+
+#define DCTL_SFTDISCON                (1 << GC_USB_DCTL_SFTDISCON_LSB)
+#define DCTL_CGOUTNAK                 (1 << GC_USB_DCTL_CGOUTNAK_LSB)
+#define DCTL_CGNPINNAK                (1 << GC_USB_DCTL_CGNPINNAK_LSB)
+#define DCTL_PWRONPRGDONE             (1 << GC_USB_DCTL_PWRONPRGDONE_LSB)
+
+#define DIEPMSK_TIMEOUTMSK            (1 << GC_USB_DIEPMSK_TIMEOUTMSK_LSB)
+#define DIEPMSK_AHBERRMSK             (1 << GC_USB_DIEPMSK_AHBERRMSK_LSB)
+#define DIEPMSK_EPDISBLDMSK           (1 << GC_USB_DIEPMSK_EPDISBLDMSK_LSB)
+#define DIEPMSK_XFERCOMPLMSK          (1 << GC_USB_DIEPMSK_XFERCOMPLMSK_LSB)
+#define DIEPMSK_INTKNTXFEMPMSK        (1 << GC_USB_DIEPMSK_INTKNTXFEMPMSK_LSB)
+#define DIEPMSK_INTKNEPMISMSK         (1 << GC_USB_DIEPMSK_INTKNEPMISMSK_LSB)
+#define DOEPMSK_SETUPMSK              (1 << GC_USB_DOEPMSK_SETUPMSK_LSB)
+#define DOEPMSK_AHBERRMSK             (1 << GC_USB_DOEPMSK_AHBERRMSK_LSB)
+#define DOEPMSK_EPDISBLDMSK           (1 << GC_USB_DOEPMSK_EPDISBLDMSK_LSB)
+#define DOEPMSK_XFERCOMPLMSK          (1 << GC_USB_DOEPMSK_XFERCOMPLMSK_LSB)
+
+#define DXEPCTL_EPTYPE_CTRL           (0 << GC_USB_DIEPCTL0_EPTYPE_LSB)
+#define DXEPCTL_EPTYPE_ISO            (1 << GC_USB_DIEPCTL0_EPTYPE_LSB)
+#define DXEPCTL_EPTYPE_BULK           (2 << GC_USB_DIEPCTL0_EPTYPE_LSB)
+#define DXEPCTL_EPTYPE_INT            (3 << GC_USB_DIEPCTL0_EPTYPE_LSB)
+#define DXEPCTL_EPTYPE_MASK           GC_USB_DIEPCTL0_EPTYPE_MASK
+#define DXEPCTL_TXFNUM(n)             ((n) << GC_USB_DIEPCTL1_TXFNUM_LSB)
+#define DXEPCTL_STALL                 (1 << GC_USB_DIEPCTL0_STALL_LSB)
+#define DXEPCTL_CNAK                  (1 << GC_USB_DIEPCTL0_CNAK_LSB)
+#define DXEPCTL_DPID                  (1 << GC_USB_DIEPCTL0_DPID_LSB)
+#define DXEPCTL_SNAK                  (1 << GC_USB_DIEPCTL0_SNAK_LSB)
+#define DXEPCTL_NAKSTS                (1 << GC_USB_DIEPCTL0_NAKSTS_LSB)
+#define DXEPCTL_EPENA                 (1 << GC_USB_DIEPCTL0_EPENA_LSB)
+#define DXEPCTL_EPDIS                 (1 << GC_USB_DIEPCTL0_EPDIS_LSB)
+#define DXEPCTL_USBACTEP              (1 << GC_USB_DIEPCTL0_USBACTEP_LSB)
+#define DXEPCTL_MPS64                 (0 << GC_USB_DIEPCTL0_MPS_LSB)
+#define DXEPCTL_MPS(cnt)              ((cnt) << GC_USB_DIEPCTL1_MPS_LSB)
+
+#define DXEPTSIZ_SUPCNT(n)            ((n) << GC_USB_DOEPTSIZ0_SUPCNT_LSB)
+#define DXEPTSIZ_PKTCNT(n)            ((n) << GC_USB_DIEPTSIZ0_PKTCNT_LSB)
+#define DXEPTSIZ_XFERSIZE(n)          ((n) << GC_USB_DIEPTSIZ0_XFERSIZE_LSB)
+
+#define DOEPDMA_BS_HOST_RDY           (0 << 30)
+#define DOEPDMA_BS_DMA_BSY            (1 << 30)
+#define DOEPDMA_BS_DMA_DONE           (2 << 30)
+#define DOEPDMA_BS_HOST_BSY           (3 << 30)
+#define DOEPDMA_BS_MASK               (3 << 30)
+#define DOEPDMA_RXSTS_MASK            (3 << 28)
+#define DOEPDMA_LAST                  (1 << 27)
+#define DOEPDMA_SP                    (1 << 26)
+#define DOEPDMA_IOC                   (1 << 25)
+#define DOEPDMA_SR                    (1 << 24)
+#define DOEPDMA_MTRF                  (1 << 23)
+#define DOEPDMA_NAK                   (1 << 16)
+#define DOEPDMA_RXBYTES(n)            (((n) & 0xFFFF) << 0)
+#define DOEPDMA_RXBYTES_MASK          (0xFFFF << 0)
+
+#define DIEPDMA_BS_HOST_RDY           (0 << 30)
+#define DIEPDMA_BS_DMA_BSY            (1 << 30)
+#define DIEPDMA_BS_DMA_DONE           (2 << 30)
+#define DIEPDMA_BS_HOST_BSY           (3 << 30)
+#define DIEPDMA_BS_MASK               (3 << 30)
+#define DIEPDMA_TXSTS_MASK            (3 << 28)
+#define DIEPDMA_LAST                  (1 << 27)
+#define DIEPDMA_SP                    (1 << 26)
+#define DIEPDMA_IOC                   (1 << 25)
+#define DIEPDMA_TXBYTES(n)            (((n) & 0xFFFF) << 0)
+#define DIEPDMA_TXBYTES_MASK          (0xFFFF << 0)
+
+struct g_usb_desc {
+	uint32_t flags;
+	void *addr;
+};
 
 #endif	/* __CROS_EC_REGISTERS_H */

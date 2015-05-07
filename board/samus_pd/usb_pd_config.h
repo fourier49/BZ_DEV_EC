@@ -247,7 +247,7 @@ static inline void pd_config_init(int port, uint8_t power_role)
 	pd_tx_init();
 
 	/* Reset mux ... for NONE polarity doesn't matter */
-	board_set_usb_mux(port, TYPEC_MUX_NONE, 0);
+	board_set_usb_mux(port, TYPEC_MUX_NONE, USB_SWITCH_DISCONNECT, 0);
 
 	if (port == 0) {
 			gpio_set_level(GPIO_USB_C0_CC1_VCONN1_EN_L, 1);
@@ -300,6 +300,9 @@ static inline int pd_snk_is_vbus_provided(int port)
  */
 #define PD_POWER_SUPPLY_TURN_ON_DELAY  30000  /* us */
 #define PD_POWER_SUPPLY_TURN_OFF_DELAY 250000 /* us */
+
+/* delay to turn on/off vconn */
+#define PD_VCONN_SWAP_DELAY 5000 /* us */
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 15000

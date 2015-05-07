@@ -3,7 +3,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  *
- * SPI flash driver for Chrome EC, particularly Winbond W25Q64FV.
+ * SPI flash driver for Chrome EC.
  */
 
 #include "common.h"
@@ -11,6 +11,7 @@
 #include "shared_mem.h"
 #include "spi.h"
 #include "spi_flash.h"
+#include "spi_flash_reg.h"
 #include "timer.h"
 #include "util.h"
 #include "watchdog.h"
@@ -25,161 +26,8 @@
  */
 #define SPI_FLASH_TIMEOUT_USEC	(800*MSEC)
 
-/*
- * Registers for the W25Q64FV SPI flash
- */
-#define SPI_FLASH_SR2_SUS		(1 << 7)
-#define SPI_FLASH_SR2_CMP		(1 << 6)
-#define SPI_FLASH_SR2_LB3		(1 << 5)
-#define SPI_FLASH_SR2_LB2		(1 << 4)
-#define SPI_FLASH_SR2_LB1		(1 << 3)
-#define SPI_FLASH_SR2_QE		(1 << 1)
-#define SPI_FLASH_SR2_SRP1		(1 << 0)
-#define SPI_FLASH_SR1_SRP0		(1 << 7)
-#define SPI_FLASH_SR1_SEC		(1 << 6)
-#define SPI_FLASH_SR1_TB		(1 << 5)
-#define SPI_FLASH_SR1_BP2		(1 << 4)
-#define SPI_FLASH_SR1_BP1		(1 << 3)
-#define SPI_FLASH_SR1_BP0		(1 << 2)
-#define SPI_FLASH_SR1_WEL		(1 << 1)
-#define SPI_FLASH_SR1_BUSY		(1 << 0)
-
 /* Internal buffer used by SPI flash driver */
 static uint8_t buf[SPI_FLASH_MAX_MESSAGE_SIZE];
-
-/**
- * Computes block write protection range from registers
- * Returns start == len == 0 for no protection
- *
- * @param sr1 Status register 1
- * @param sr2 Status register 2
- * @param start Output pointer for protection start offset
- * @param len Output pointer for protection length
- *
- * @return EC_SUCCESS, or non-zero if any error.
- */
-static int reg_to_protect(uint8_t sr1, uint8_t sr2, unsigned int *start,
-	unsigned int *len)
-{
-	int blocks;
-	int size;
-	uint8_t cmp;
-	uint8_t sec;
-	uint8_t tb;
-	uint8_t bp;
-
-	/* Determine flags */
-	cmp = (sr2 & SPI_FLASH_SR2_CMP) ? 1 : 0;
-	sec = (sr1 & SPI_FLASH_SR1_SEC) ? 1 : 0;
-	tb = (sr1 & SPI_FLASH_SR1_TB) ? 1 : 0;
-	bp = (sr1 & (SPI_FLASH_SR1_BP2 | SPI_FLASH_SR1_BP1 | SPI_FLASH_SR1_BP0))
-		 >> 2;
-
-	/* Bad pointers or invalid data */
-	if (!start || !len || sr1 == -1 || sr2 == -1)
-		return EC_ERROR_INVAL;
-
-	/* Not defined by datasheet */
-	if (sec && bp == 6)
-		return EC_ERROR_INVAL;
-
-	/* Determine granularity (4kb sector or 64kb block) */
-	/* Computation using 2 * 1024 is correct */
-	size = sec ? (2 * 1024) : (64 * 1024);
-
-	/* Determine number of blocks */
-	/* Equivalent to pow(2, bp) with pow(2, 0) = 0 */
-	blocks = bp ? (1 << bp) : 0;
-	/* Datasheet specifies don't care for BP == 4, BP == 5 */
-	if (sec && bp == 5)
-		blocks = (1 << 4);
-
-	/* Determine number of bytes */
-	*len = size * blocks;
-
-	/* Determine bottom/top of memory to protect */
-	*start = tb ? 0 :
-			(CONFIG_SPI_FLASH_SIZE - *len) % CONFIG_SPI_FLASH_SIZE;
-
-	/* Reverse computations if complement set */
-	if (cmp) {
-		*start = (*start + *len) % CONFIG_SPI_FLASH_SIZE;
-		*len = CONFIG_SPI_FLASH_SIZE - *len;
-	}
-
-	return EC_SUCCESS;
-}
-
-/**
- * Computes block write protection registers from range
- *
- * @param start Desired protection start offset
- * @param len Desired protection length
- * @param sr1 Output pointer for status register 1
- * @param sr2 Output pointer for status register 2
- *
- * @return EC_SUCCESS, or non-zero if any error.
- */
-static int protect_to_reg(unsigned int start, unsigned int len,
-	uint8_t *sr1, uint8_t *sr2)
-{
-	char cmp = 0;
-	char sec = 0;
-	char tb = 0;
-	char bp = 0;
-	int blocks;
-	int size;
-
-	/* Bad pointers */
-	if (!sr1 || !sr2 || *sr1 == -1 || *sr2 == -1)
-		return EC_ERROR_INVAL;
-
-	/* Invalid data */
-	if ((start && !len) || start + len > CONFIG_SPI_FLASH_SIZE)
-		return EC_ERROR_INVAL;
-
-	/* Set complement bit based on whether length is power of 2 */
-	if ((len & (len - 1)) != 0) {
-		cmp = 1;
-		start = (start + len) % CONFIG_SPI_FLASH_SIZE;
-		len = CONFIG_SPI_FLASH_SIZE - len;
-	}
-
-	/* Set bottom/top bit based on start address */
-	/* Do not set if len == 0 or len == CONFIG_SPI_FLASH_SIZE */
-	if (!start && (len % CONFIG_SPI_FLASH_SIZE))
-		tb = 1;
-
-	/* Set sector bit and determine block length based on protect length */
-	if (len == 0 || len >= 128 * 1024) {
-		sec = 0;
-		size = 64 * 1024;
-	} else if (len >= 4 * 1024 && len <= 32 * 1024) {
-		sec = 1;
-		size = 2 * 1024;
-	} else
-		return EC_ERROR_INVAL;
-
-	/* Determine number of blocks */
-	if (len % size != 0)
-		return EC_ERROR_INVAL;
-	blocks = len / size;
-
-	/* Determine bp = log2(blocks) with log2(0) = 0 */
-	bp = blocks ? (31 - __builtin_clz(blocks)) : 0;
-
-	/* Clear bits */
-	*sr1 &= ~(SPI_FLASH_SR1_SEC | SPI_FLASH_SR1_TB |
-		SPI_FLASH_SR1_BP2 | SPI_FLASH_SR1_BP1 | SPI_FLASH_SR1_BP0);
-	*sr2 &= ~SPI_FLASH_SR2_CMP;
-
-	/* Set bits */
-	*sr1 |= (sec ? SPI_FLASH_SR1_SEC : 0) | (tb ? SPI_FLASH_SR1_TB : 0)
-			| (bp << 2);
-	*sr2 |= (cmp ? SPI_FLASH_SR2_CMP : 0);
-
-	return EC_SUCCESS;
-}
 
 /**
  * Waits for chip to finish current operation. Must be called after
@@ -236,6 +84,11 @@ uint8_t spi_flash_get_status2(void)
 	uint8_t cmd = SPI_FLASH_READ_SR2;
 	uint8_t resp;
 
+	/* Second status register not present */
+#ifndef CONFIG_SPI_FLASH_HAS_SR2
+	return 0;
+#endif
+
 	if (spi_transaction(&cmd, 1, &resp, 1) != EC_SUCCESS)
 		return -1;
 
@@ -257,14 +110,18 @@ int spi_flash_set_status(int reg1, int reg2)
 	int rv = EC_SUCCESS;
 
 	/* Register has protection */
-	rv = spi_flash_check_wp();
-	if (rv)
-		return rv;
+	if (spi_flash_check_wp() != SPI_WP_NONE)
+		return EC_ERROR_ACCESS_DENIED;
 
 	/* Enable writing to SPI flash */
 	rv = spi_flash_write_enable();
 	if (rv)
 		return rv;
+
+	/* Second status register not present */
+#ifndef CONFIG_SPI_FLASH_HAS_SR2
+	reg2 = -1;
+#endif
 
 	if (reg2 == -1)
 		rv = spi_transaction(cmd, 2, NULL, 0);
@@ -458,21 +315,22 @@ uint64_t spi_flash_get_unique_id(void)
 
 /**
  * Check for SPI flash status register write protection
- * Cannot sample WP pin, will consider hardware WP to be no protection
+ * Cannot sample WP pin, so caller should sample it if necessary, if
+ * SPI_WP_HARDWARE is returned.
  *
- * @param wp Status register write protection mode
- *
- * @return EC_SUCCESS for no protection, or non-zero if error.
+ * @return enum spi_flash_wp status based on protection
  */
-int spi_flash_check_wp(void)
+enum spi_flash_wp spi_flash_check_wp(void)
 {
-	int sr2 = spi_flash_get_status2();
+	int sr1_prot = spi_flash_get_status1() & SPI_FLASH_SR1_SRP0;
+	int sr2_prot = spi_flash_get_status2() & SPI_FLASH_SR2_SRP1;
 
-	/* Power cycle or OTP protection */
-	if (sr2 & SPI_FLASH_SR2_SRP1)
-		return EC_ERROR_ACCESS_DENIED;
+	if (sr2_prot)
+		return sr1_prot ? SPI_WP_PERMANENT : SPI_WP_POWER_CYCLE;
+	else if (sr1_prot)
+		return SPI_WP_HARDWARE;
 
-	return EC_SUCCESS;
+	return SPI_WP_NONE;
 }
 
 /**
@@ -532,7 +390,7 @@ int spi_flash_check_protect(unsigned int offset, unsigned int bytes)
 		return EC_ERROR_INVAL;
 
 	/* Compute current protect range */
-	rv = reg_to_protect(sr1, sr2, &start, &len);
+	rv = spi_flash_reg_to_protect(sr1, sr2, &start, &len);
 	if (rv)
 		return rv;
 
@@ -563,7 +421,7 @@ int spi_flash_set_protect(unsigned int offset, unsigned int bytes)
 		return EC_ERROR_INVAL;
 
 	/* Compute desired protect range */
-	rv = protect_to_reg(offset, bytes, &sr1, &sr2);
+	rv = spi_flash_protect_to_reg(offset, bytes, &sr1, &sr2);
 	if (rv)
 		return rv;
 

@@ -37,7 +37,9 @@ void gpio_set_alternate_function(uint32_t port, uint32_t mask, int func)
 		i = __builtin_ffs(mask) - 1;
 		val = MEC1322_GPIO_CTL(port, i);
 		val &= ~((1 << 12) | (1 << 13));
-		val |= (func & 0x3) << 12;
+		/* mux_control = 0 indicates GPIO */
+		if (func > 0)
+			val |= (func & 0x3) << 12;
 		MEC1322_GPIO_CTL(port, i) = val;
 		mask &= ~(1 << i);
 	}
@@ -218,12 +220,10 @@ static void gpio_interrupt(int girq, int port_offset)
 
 	MEC1322_INT_SOURCE(girq) |= sts;
 
-	for (i = 0; i < GPIO_COUNT && sts; ++i, ++g) {
-		if (!g->irq_handler)
-			continue;
+	for (i = 0; i < GPIO_IH_COUNT && sts; ++i, ++g) {
 		bit = (g->port - port_offset) * 8 + __builtin_ffs(g->mask) - 1;
 		if (sts & (1 << bit))
-			g->irq_handler(i);
+			gpio_irq_handlers[i](i);
 		sts &= ~(1 << bit);
 	}
 }

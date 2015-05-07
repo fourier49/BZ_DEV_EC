@@ -42,8 +42,8 @@ const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
 const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
-		PDO_BATT(5000, 20000, 15000),
-		PDO_VAR(5000, 20000, 3000),
+		PDO_BATT(4750, 21000, 15000),
+		PDO_VAR(4750, 21000, 3000),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
@@ -151,24 +151,41 @@ int pd_check_data_swap(int port, int data_role)
 	return (data_role == PD_ROLE_UFP) ? 1 : 0;
 }
 
+int pd_check_vconn_swap(int port)
+{
+	/* in S5, do not allow vconn swap since pp5000 rail is off */
+	return gpio_get_level(GPIO_PCH_SLP_S5_L);
+}
+
 void pd_execute_data_swap(int port, int data_role)
 {
-	/* Open USB switches when taking UFP role */
-	set_usb_switches(port, (data_role == PD_ROLE_UFP));
+
 }
 
-void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+void pd_check_pr_role(int port, int pr_role, int flags)
 {
-	/* If sink, and dual role toggling is on, then switch to source */
-	if (partner_pr_swap && pr_role == PD_ROLE_SINK &&
-	    pd_get_dual_role() == PD_DRP_TOGGLE_ON)
-		pd_request_power_swap(port);
+	/*
+	 * If partner is dual-role power and dualrole toggling is on, consider
+	 * if a power swap is necessary.
+	 */
+	if ((flags & PD_FLAGS_PARTNER_DR_POWER) &&
+	    pd_get_dual_role() == PD_DRP_TOGGLE_ON) {
+		/*
+		 * If we are a sink and partner is not externally powered, then
+		 * swap to become a source. If we are source and partner is
+		 * externally powered, swap to become a sink.
+		 */
+		int partner_extpower = flags & PD_FLAGS_PARTNER_EXTPOWER;
+		if ((!partner_extpower && pr_role == PD_ROLE_SINK) ||
+		     (partner_extpower && pr_role == PD_ROLE_SOURCE))
+			pd_request_power_swap(port);
+	}
 }
 
-void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
+void pd_check_dr_role(int port, int dr_role, int flags)
 {
 	/* If UFP, try to switch to DFP */
-	if (partner_dr_swap && dr_role == PD_ROLE_UFP)
+	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
 		pd_request_data_swap(port);
 }
 /* ----------------- Vendor Defined Messages ------------------ */
@@ -241,12 +258,15 @@ int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 }
 
 static int dp_flags[PD_PORT_COUNT];
+/* DP Status VDM as returned by UFP */
+static uint32_t dp_status[PD_PORT_COUNT];
 
 static void svdm_safe_dp_mode(int port)
 {
 	/* make DP interface safe until configure */
-	board_set_usb_mux(port, TYPEC_MUX_NONE, pd_get_polarity(port));
+	board_set_usb_mux(port, TYPEC_MUX_NONE, USB_SWITCH_CONNECT, 0);
 	dp_flags[port] = 0;
+	dp_status[port] = 0;
 }
 
 static int svdm_enter_dp_mode(int port, uint32_t mode_caps)
@@ -279,26 +299,32 @@ static int svdm_dp_status(int port, uint32_t *payload)
 static int svdm_dp_config(int port, uint32_t *payload)
 {
 	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
-	board_set_usb_mux(port, TYPEC_MUX_DP, pd_get_polarity(port));
+	int mf_pref = PD_VDO_DPSTS_MF_PREF(dp_status[port]);
+	int pin_mode = pd_dfp_dp_get_pin_mode(port, dp_status[port]);
+
+	if (!pin_mode)
+		return 0;
+
+	board_set_usb_mux(port, mf_pref ? TYPEC_MUX_DOCK : TYPEC_MUX_DP,
+			  USB_SWITCH_CONNECT, pd_get_polarity(port));
+
 	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
 			 CMD_DP_CONFIG | VDO_OPOS(opos));
-	payload[1] = VDO_DP_CFG(MODE_DP_PIN_E, /* sink pins */
-				MODE_DP_PIN_E, /* src pins */
+	payload[1] = VDO_DP_CFG(pin_mode,      /* UFP_U as UFP_D */
+				0,             /* UFP_U as DFP_D */
 				1,             /* DPv1.3 signaling */
-				2);            /* UFP connected */
+				2);            /* UFP_U connected as UFP_D */
 	return 2;
 };
 
+#define PORT_TO_HPD(port) ((port) ? GPIO_USB_C1_DP_HPD : GPIO_USB_C0_DP_HPD)
 static void svdm_dp_post_config(int port)
 {
 	dp_flags[port] |= DP_FLAGS_DP_ON;
 	if (!(dp_flags[port] & DP_FLAGS_HPD_HI_PENDING))
 		return;
 
-	if (port)
-		gpio_set_level(GPIO_USB_C1_DP_HPD, 1);
-	else
-		gpio_set_level(GPIO_USB_C0_DP_HPD, 1);
+	gpio_set_level(PORT_TO_HPD(port), 1);
 }
 
 static void hpd0_irq_deferred(void)
@@ -313,16 +339,18 @@ static void hpd1_irq_deferred(void)
 
 DECLARE_DEFERRED(hpd0_irq_deferred);
 DECLARE_DEFERRED(hpd1_irq_deferred);
-
-#define PORT_TO_HPD(port) ((port) ? GPIO_USB_C1_DP_HPD : GPIO_USB_C0_DP_HPD)
+#define PORT_TO_HPD_IRQ_DEFERRED(port) ((port) ? hpd1_irq_deferred : \
+					hpd0_irq_deferred)
 
 static int svdm_dp_attention(int port, uint32_t *payload)
 {
 	int cur_lvl;
-	int lvl = PD_VDO_HPD_LVL(payload[1]);
-	int irq = PD_VDO_HPD_IRQ(payload[1]);
+	int lvl = PD_VDO_DPSTS_HPD_LVL(payload[1]);
+	int irq = PD_VDO_DPSTS_HPD_IRQ(payload[1]);
 	enum gpio_signal hpd = PORT_TO_HPD(port);
 	cur_lvl = gpio_get_level(hpd);
+
+	dp_status[port] = payload[1];
 
 	/* Its initial DP status message prior to config */
 	if (!(dp_flags[port] & DP_FLAGS_DP_ON)) {
@@ -333,11 +361,8 @@ static int svdm_dp_attention(int port, uint32_t *payload)
 
 	if (irq & cur_lvl) {
 		gpio_set_level(hpd, 0);
-		/* 250 usecs is minimum, 2msec is max */
-		if (port)
-			hook_call_deferred(hpd1_irq_deferred, 300);
-		else
-			hook_call_deferred(hpd0_irq_deferred, 300);
+		hook_call_deferred(PORT_TO_HPD_IRQ_DEFERRED(port),
+				   HPD_DEBOUNCE_IRQ);
 	} else if (irq & !cur_lvl) {
 		CPRINTF("ERR:HPD:IRQ&LOW\n");
 		return 0; /* nak */

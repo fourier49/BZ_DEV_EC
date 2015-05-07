@@ -13,11 +13,13 @@
 /* PD Host command timeout */
 #define PD_HOST_COMMAND_TIMEOUT_US SECOND
 
-enum pd_errors {
-	PD_ERR_INVAL = -1,      /* Invalid packet */
-	PD_ERR_HARD_RESET = -2, /* Got a Hard-Reset packet */
-	PD_ERR_CRC = -3,        /* CRC mismatch */
-	PD_ERR_ID = -4,         /* Invalid ID number */
+enum pd_rx_errors {
+	PD_RX_ERR_INVAL = -1,           /* Invalid packet */
+	PD_RX_ERR_HARD_RESET = -2,      /* Got a Hard-Reset packet */
+	PD_RX_ERR_CRC = -3,             /* CRC mismatch */
+	PD_RX_ERR_ID = -4,              /* Invalid ID number */
+	PD_RX_ERR_UNSUPPORTED_SOP = -5, /* Unsupported SOP */
+	PD_RX_ERR_CABLE_RESET = -6      /* Got a Cable-Reset packet */
 };
 
 /* incoming packet event (for the USB PD task) */
@@ -134,6 +136,9 @@ enum pd_errors {
 #define PD_T_SRC_TURN_ON      (275*MSEC) /* 275ms */
 #define PD_T_SAFE_0V          (650*MSEC) /* 650ms */
 #define PD_T_NO_RESPONSE     (5500*MSEC) /* between 4.5s and 5.5s */
+#define PD_T_BIST_TRANSMIT     (50*MSEC) /* 50ms (used for task_wait arg) */
+#define PD_T_BIST_RECEIVE      (60*MSEC) /* 60ms (max time to process bist) */
+#define PD_T_VCONN_SOURCE_ON  (100*MSEC) /* 100ms */
 
 /* number of edges and time window to detect CC line is not idle */
 #define PD_RX_TRANSITION_COUNT  3
@@ -483,12 +488,22 @@ struct pd_policy {
 	(((snkp) & 0xff) << 16 | ((srcp) & 0xff) << 8			\
 	 | ((usb) & 1) << 7 | ((gdr) & 1) << 6 | ((sign) & 0xF) << 2	\
 	 | ((sdir) & 0x3))
+#define PD_VDO_MODE_DP_SNKP(x) (((x) >> 16) & 0x3f)
+#define PD_VDO_MODE_DP_SRCP(x) (((x) >> 8) & 0x3f)
 
 #define MODE_DP_PIN_A 0x01
 #define MODE_DP_PIN_B 0x02
 #define MODE_DP_PIN_C 0x04
 #define MODE_DP_PIN_D 0x08
 #define MODE_DP_PIN_E 0x10
+#define MODE_DP_PIN_F 0x20
+
+/* Pin configs B/D/F support multi-function */
+#define MODE_DP_PIN_MF_MASK 0x2a
+/* Pin configs A/B support BR2 signaling levels */
+#define MODE_DP_PIN_BR2_MASK 0x3
+/* Pin configs C/D/E/F support DP signaling levels */
+#define MODE_DP_PIN_DP_MASK 0x3c
 
 #define MODE_DP_V13  0x1
 #define MODE_DP_GEN2 0x2
@@ -496,9 +511,6 @@ struct pd_policy {
 #define MODE_DP_SNK  0x1
 #define MODE_DP_SRC  0x2
 #define MODE_DP_BOTH 0x3
-
-#define PD_VDO_AMA_SNK_PINS(mode)       (((mode) >> 16) & 0xff)
-#define PD_VDO_AMA_SRC_PINS(mode)       (((mode) >> 8)  & 0xff)
 
 /*
  * DisplayPort Status VDO
@@ -519,9 +531,9 @@ struct pd_policy {
 	 | ((usbc) & 1) << 5 | ((mf) & 1) << 4 | ((en) & 1) << 3	\
 	 | ((lp) & 1) << 2 | ((conn & 0x3) << 0))
 
-#define PD_VDO_HPD_IRQ(x) ((x >> 8) & 1)
-#define PD_VDO_HPD_LVL(x) ((x >> 7) & 1)
-#define PD_VDO_MFUNC_PREF(x) ((x >> 4) & 1)
+#define PD_VDO_DPSTS_HPD_IRQ(x) (((x) >> 8) & 1)
+#define PD_VDO_DPSTS_HPD_LVL(x) (((x) >> 7) & 1)
+#define PD_VDO_DPSTS_MF_PREF(x) (((x) >> 4) & 1)
 
 #define PD_VDO_STS_CONN(x) ((x) & 0x03)
 #define DP_STS_CONN_NONE    0
@@ -536,12 +548,12 @@ struct pd_policy {
  * DisplayPort Configure VDO
  * -------------------------
  * <31:24> : SBZ
- * <23:16> : sink pin assignment supported (same as mode caps)
- * <15:8>  : source pin assignment supported (same as mode caps)
+ * <23:16> : sink pin assignment requested.  Choose one from mode caps.
+ * <15:8>  : source pin assignment requested.  Choose one from mode caps.
  * <7:6>   : SBZ
  * <5:2>   : signalling : 1h == DP v1.3, 2h == Gen 2
  *           Oh is only for USB, remaining values are reserved
- * <1:0>   : cfg : 00 == USB, 01|10 == DP, 11 == reserved
+ * <1:0>   : cfg : 00 == USB, 01 == DFP_D, 10 == UFP_D, 11 == reserved
  */
 #define VDO_DP_CFG(snkp, srcp, sig, cfg)				\
 	(((snkp) & 0xff) << 16 | ((srcp) & 0xff) << 8			\
@@ -581,11 +593,14 @@ struct pd_policy {
 #define USB_SID_PD          0xff00 /* power delivery */
 #define USB_SID_DISPLAYPORT 0xff01
 
-#define USB_GOOGLE_TYPEC_URL  "http://www.google.com/chrome/devices/typec"
+#define USB_GOOGLE_TYPEC_URL "http://www.google.com/chrome/devices/typec"
 #define USB_BIZLINK_TYPEC_URL "http://www.bizlinktech.com/itbu/devices/typec"
 /* USB Vendor ID assigned to Google Inc. */
 #define USB_VID_GOOGLE  0x18d1
 #define USB_VID_BIZLINK 0x06C4
+
+/* Other Vendor IDs */
+#define USB_VID_APPLE  0x05ac
 
 /* Timeout for message receive in microseconds */
 #define USB_PD_RX_TMOUT_US 1800
@@ -594,8 +609,8 @@ struct pd_policy {
 
 enum pd_states {
 	PD_STATE_DISABLED,
-#ifdef CONFIG_USB_PD_DUAL_ROLE
 	PD_STATE_SUSPENDED,
+#ifdef CONFIG_USB_PD_DUAL_ROLE
 	PD_STATE_SNK_DISCONNECTED,
 	PD_STATE_SNK_DISCONNECTED_DEBOUNCE,
 	PD_STATE_SNK_HARD_RESET_RECOVER,
@@ -603,7 +618,6 @@ enum pd_states {
 	PD_STATE_SNK_REQUESTED,
 	PD_STATE_SNK_TRANSITION,
 	PD_STATE_SNK_READY,
-	PD_STATE_SNK_DR_SWAP,
 
 	PD_STATE_SNK_SWAP_INIT,
 	PD_STATE_SNK_SWAP_SNK_DISABLE,
@@ -624,25 +638,59 @@ enum pd_states {
 	PD_STATE_SRC_TRANSITION,
 	PD_STATE_SRC_READY,
 	PD_STATE_SRC_GET_SINK_CAP,
-	PD_STATE_SRC_DR_SWAP,
+	PD_STATE_DR_SWAP,
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 	PD_STATE_SRC_SWAP_INIT,
 	PD_STATE_SRC_SWAP_SNK_DISABLE,
 	PD_STATE_SRC_SWAP_SRC_DISABLE,
 	PD_STATE_SRC_SWAP_STANDBY,
+
+#ifdef CONFIG_USBC_VCONN_SWAP
+	PD_STATE_VCONN_SWAP_SEND,
+	PD_STATE_VCONN_SWAP_INIT,
+	PD_STATE_VCONN_SWAP_READY,
+#endif /* CONFIG_USBC_VCONN_SWAP */
 #endif /* CONFIG_USB_PD_DUAL_ROLE */
 
 	PD_STATE_SOFT_RESET,
 	PD_STATE_HARD_RESET_SEND,
 	PD_STATE_HARD_RESET_EXECUTE,
 #ifdef CONFIG_COMMON_RUNTIME
-	PD_STATE_BIST,
+	PD_STATE_BIST_RX,
+	PD_STATE_BIST_TX,
 #endif
 
 	/* Number of states. Not an actual state. */
 	PD_STATE_COUNT,
 };
+
+#define PD_FLAGS_PING_ENABLED      (1 << 0) /* SRC_READY pings enabled */
+#define PD_FLAGS_PARTNER_DR_POWER  (1 << 1) /* port partner is dualrole power */
+#define PD_FLAGS_PARTNER_DR_DATA   (1 << 2) /* port partner is dualrole data */
+#define PD_FLAGS_DATA_SWAPPED      (1 << 3) /* data swap complete */
+#define PD_FLAGS_SNK_CAP_RECVD     (1 << 4) /* sink capabilities received */
+#define PD_FLAGS_GET_SNK_CAP_SENT  (1 << 5) /* get sink cap sent */
+#define PD_FLAGS_EXPLICIT_CONTRACT (1 << 6) /* explicit pwr contract in place */
+#define PD_FLAGS_SFT_RST_DIS_COMM  (1 << 7) /* disable comms after soft reset */
+#define PD_FLAGS_PREVIOUS_PD_CONN  (1 << 8) /* previously PD connected */
+#define PD_FLAGS_CHECK_PR_ROLE     (1 << 9) /* check power role in READY */
+#define PD_FLAGS_CHECK_DR_ROLE     (1 << 10)/* check data role in READY */
+#define PD_FLAGS_PARTNER_EXTPOWER  (1 << 11)/* port partner has external pwr */
+#define PD_FLAGS_VCONN_ON          (1 << 12)/* vconn is being sourced */
+/* Flags to clear on a disconnect */
+#define PD_FLAGS_RESET_ON_DISCONNECT_MASK (PD_FLAGS_PARTNER_DR_POWER | \
+					   PD_FLAGS_PARTNER_DR_DATA | \
+					   PD_FLAGS_DATA_SWAPPED | \
+					   PD_FLAGS_SNK_CAP_RECVD | \
+					   PD_FLAGS_GET_SNK_CAP_SENT | \
+					   PD_FLAGS_EXPLICIT_CONTRACT | \
+					   PD_FLAGS_PREVIOUS_PD_CONN | \
+					   PD_FLAGS_CHECK_PR_ROLE | \
+					   PD_FLAGS_CHECK_DR_ROLE | \
+					   PD_FLAGS_PARTNER_EXTPOWER | \
+					   PD_FLAGS_VCONN_ON)
+
 
 enum pd_cc_states {
 	PD_CC_NONE,
@@ -720,11 +768,15 @@ enum pd_data_msg_type {
 #define PD_REV10 0
 #define PD_REV20 1
 
-/* Port role */
+/* Power role */
 #define PD_ROLE_SINK   0
 #define PD_ROLE_SOURCE 1
+/* Data role */
 #define PD_ROLE_UFP    0
 #define PD_ROLE_DFP    1
+/* Vconn role */
+#define PD_ROLE_VCONN_OFF 0
+#define PD_ROLE_VCONN_ON  1
 
 /* build message header */
 #define PD_HEADER(type, prole, drole, id, cnt) \
@@ -893,22 +945,42 @@ int pd_check_power_swap(int port);
 int pd_check_data_swap(int port, int data_role);
 
 /**
+ * Check if vconn swap is allowed.
+ *
+ * @param port USB-C port number
+ * @return True if vconn swap is allowed, False otherwise
+ */
+
+int pd_check_vconn_swap(int port);
+
+/**
  * Check current power role for potential power swap
  *
  * @param port USB-C port number
  * @param pr_role Our power role
- * @param partner_pr_swap Partner supports PR_SWAP
+ * @param flags PD flags
  */
-void pd_check_pr_role(int port, int pr_role, int partner_pr_swap);
+void pd_check_pr_role(int port, int pr_role, int flags);
 
 /**
  * Check current data role for potential data swap
  *
  * @param port USB-C port number
  * @param dr_role Our data role
- * @param partner_dr_swap Partner supports DR_SWAP
+ * @param flags PD flags
  */
-void pd_check_dr_role(int port, int dr_role, int partner_dr_swap);
+void pd_check_dr_role(int port, int dr_role, int flags);
+
+/**
+ * Check if we should charge from this device. This is
+ * basically a white-list for chargers that are dual-role,
+ * don't set the externally powered bit, but we should charge
+ * from by default.
+ *
+ * @param vid Port partner Vendor ID
+ * @param pid Port partner Product ID
+ */
+int pd_charge_from_device(uint16_t vid, uint16_t pid);
 
 /**
  * Execute data swap.
@@ -968,6 +1040,15 @@ int pd_custom_flash_vdm(int port, int cnt, uint32_t *payload);
 uint32_t pd_dfp_enter_mode(int port, uint16_t svid, int opos);
 
 /**
+ *  Get DisplayPort pin mode for DFP to request from UFP's capabilities.
+ *
+ * @param port     USB-C port number.
+ * @param status   DisplayPort Status VDO.
+ * @return one-hot PIN config to request.
+ */
+int pd_dfp_dp_get_pin_mode(int port, uint32_t status);
+
+/**
  * Exit alternate mode on DFP
  *
  * @param port USB-C port number
@@ -991,6 +1072,14 @@ void pd_dfp_pe_init(int port);
  * @return      the USB Vendor Identifier or 0 if it doesn't exist
  */
 uint16_t pd_get_identity_vid(int port);
+
+/**
+ * Return the PID of the USB PD accessory connected to a specified port
+ *
+ * @param port  USB-C port number
+ * @return      the USB Product Identifier or 0 if it doesn't exist
+ */
+uint16_t pd_get_identity_pid(int port);
 
 /**
  * Store Device ID & RW hash of device
@@ -1056,6 +1145,11 @@ enum typec_mux {
 	TYPEC_MUX_DOCK,
 };
 
+enum usb_switch {
+	USB_SWITCH_CONNECT,
+	USB_SWITCH_DISCONNECT,
+};
+
 /**
  * Configure superspeed muxes on type-C port.
  *
@@ -1063,7 +1157,8 @@ enum typec_mux {
  * @param mux selected function.
  * @param polarity plug polarity (0=CC1, 1=CC2).
  */
-void board_set_usb_mux(int port, enum typec_mux mux, int polarity);
+void board_set_usb_mux(int port, enum typec_mux mux,
+		       enum usb_switch usb, int polarity);
 
 /**
  * Query superspeed mux status on type-C port.
@@ -1230,6 +1325,13 @@ int pd_start_tx(int port, int polarity, int bit_len);
 void pd_tx_set_circular_mode(int port);
 
 /**
+ * Stop PD TX DMA circular mode transaction already in progress.
+ *
+ * @param port USB-C port number
+ */
+void pd_tx_clear_circular_mode(int port);
+
+/**
  * Call when we are done sending a packet.
  *
  * @param port USB-C port number
@@ -1282,7 +1384,27 @@ void pd_hw_release(int port);
  */
 void pd_hw_init(int port, int role);
 
+/**
+ * Initialize the reception side of hardware used for PD.
+ *
+ * This is a subset of pd_hw_init() including only :
+ * the comparators + the RX edge delay timer + the RX DMA.
+ *
+ * @param port USB-C port number
+ */
+void pd_hw_init_rx(int port);
+
 /* --- Protocol layer functions --- */
+
+/**
+ * Decode a raw packet in the RX buffer.
+ *
+ * @param port USB-C port number
+ * @param payload buffer to store the packet payload (must be 7x 32-bit)
+ * @return the packet header or <0 in case of error
+ */
+int pd_analyze_rx(int port, uint32_t *payload);
+
 /**
  * Get connected state
  *

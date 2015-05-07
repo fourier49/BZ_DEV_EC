@@ -14,6 +14,7 @@
 #include "task.h"
 #include "timer.h"
 #include "util.h"
+#include "kmsc_chip.h"
 
 /*
  * Converts port (ie GPIO A) to base address offset of the control register
@@ -329,8 +330,6 @@ void gpio_pre_init(void)
 	}
 }
 
-
-
 /**
  * Handle a GPIO interrupt by calling the pins corresponding handler if
  * one exists.
@@ -343,9 +342,9 @@ static void gpio_interrupt(int port, uint8_t mask)
 	int i = 0;
 	const struct gpio_info *g = gpio_list;
 
-	for (i = 0; i < GPIO_COUNT; i++, g++) {
-		if (port == g->port && (mask & g->mask) && g->irq_handler) {
-			g->irq_handler(i);
+	for (i = 0; i < GPIO_IH_COUNT; i++, g++) {
+		if (port == g->port && (mask & g->mask))
+			gpio_irq_handlers[i](i);
 			return;
 		}
 	}
@@ -360,6 +359,13 @@ static void __gpio_irq(void)
 {
 	/* Determine interrupt number. */
 	int irq = IT83XX_INTC_IVCT2 - 16;
+
+#if defined(HAS_TASK_KEYSCAN) && defined(CONFIG_KEYBOARD_KSI_WUC_INT)
+	if (irq == IT83XX_IRQ_WKINTC) {
+		keyboard_raw_interrupt();
+		return;
+	}
+#endif
 
 	/* Run the GPIO master handler above with corresponding port/mask. */
 	gpio_interrupt(gpio_irqs[irq].gpio_port, gpio_irqs[irq].gpio_mask);

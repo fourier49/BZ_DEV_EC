@@ -16,13 +16,11 @@
 #define CONFIG_UART_CONSOLE 2
 
 /* By default, enable all console messages excepted USB */
-#define CC_DEFAULT     (CC_ALL & ~CC_MASK(CC_USBPD))
+#define CC_DEFAULT     (CC_ALL & ~(CC_MASK(CC_USB) | CC_MASK(CC_LIGHTBAR)))
 
 /* Optional features */
 #undef CONFIG_CMD_HASH
 #define CONFIG_CHARGE_MANAGER
-#define CONFIG_CHARGE_RAMP
-#define CONFIG_CMD_CHGRAMP
 #define CONFIG_FORCE_CONSOLE_RESUME
 #define CONFIG_STM_HWTIMER32
 #define CONFIG_USB_POWER_DELIVERY
@@ -55,11 +53,11 @@
 #define CONFIG_BATTERY_REVIVE_DISCONNECT
 #define CONFIG_CHARGER
 #define CONFIG_CHARGER_V2
-#define CONFIG_CHARGER_BQ24773
+#define CONFIG_CHARGER_BQ25892
+#define CONFIG_CHARGER_BQ2589X_BOOST (BQ2589X_BOOSTV_MV(4998) | \
+				      BQ2589X_BOOST_LIM_1650MA)
 #define CONFIG_CHARGER_ILIM_PIN_DISABLED
 #define CONFIG_CHARGER_PROFILE_OVERRIDE
-#define CONFIG_CHARGER_SENSE_RESISTOR 5
-#define CONFIG_CHARGER_SENSE_RESISTOR_AC 10
 #define CONFIG_CHARGER_INPUT_CURRENT 512
 #define CONFIG_CHARGER_DISCHARGE_ON_AC
 #define CONFIG_CHIPSET_TEGRA
@@ -98,26 +96,36 @@
 #define USB_IFACE_CONSOLE   0
 #define USB_IFACE_AP_STREAM 1
 #define USB_IFACE_SH_STREAM 2
-#define USB_IFACE_COUNT     3
+#define USB_IFACE_SPI       3
+#define USB_IFACE_COUNT     4
 
 /* USB endpoint indexes (use define rather than enum to expand them) */
 #define USB_EP_CONTROL   0
 #define USB_EP_CONSOLE   1
 #define USB_EP_AP_STREAM 2
 #define USB_EP_SH_STREAM 3
-#define USB_EP_COUNT     4
+#define USB_EP_SPI       4
+#define USB_EP_COUNT     5
 
 /* Enable console over USB */
 #define CONFIG_USB_CONSOLE
+
+/* Enable control of SPI over USB */
+#define CONFIG_SPI_MASTER_PORT 2
+#define CONFIG_SPI_CS_GPIO     GPIO_SPI_FLASH_NSS
+
+#define CONFIG_USB_SPI
 
 /* Enable Case Closed Debugging */
 #define CONFIG_CASE_CLOSED_DEBUG
 
 /* Maximum number of deferrable functions */
 #undef  DEFERRABLE_MAX_COUNT
-#define DEFERRABLE_MAX_COUNT 11
+#define DEFERRABLE_MAX_COUNT 14
 
 #ifndef __ASSEMBLER__
+
+int board_get_version(void);
 
 /* Timer selection */
 #define TIM_CLOCK32 5
@@ -138,8 +146,6 @@ enum adc_channel {
 	ADC_VBUS = 0,
 	ADC_CC1_PD,
 	ADC_CC2_PD,
-	ADC_IADP,
-	ADC_IBAT,
 	/* Number of ADC channels */
 	ADC_CH_COUNT
 };
@@ -178,6 +184,9 @@ int board_discharge_on_ac(int enable);
 
 /* Set the charge current limit. */
 void board_set_charge_limit(int charge_ma);
+
+/* PP1800 transition GPIO interrupt handler */
+void pp1800_on_off_evt(enum gpio_signal signal);
 
 #endif /* !__ASSEMBLER__ */
 

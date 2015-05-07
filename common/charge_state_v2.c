@@ -46,8 +46,20 @@ static int manual_mode;  /* volt/curr are no longer maintained by charger */
 static unsigned int user_current_limit = -1U;
 test_export_static timestamp_t shutdown_warning_time;
 static timestamp_t precharge_start_time;
+
+/* Is battery connected but unresponsive after precharge? */
 static int battery_seems_to_be_dead;
+
 static int battery_seems_to_be_disconnected;
+
+/*
+ * Was battery removed?  Set when we see BP_NO, cleared after the battery is
+ * reattached and becomes responsive.  Used to indicate an error state after
+ * removal and trigger re-reading the battery static info when battery is
+ * reattached and responsive.
+ */
+static int battery_was_removed;
+
 static int problems_exist;
 static int debugging;
 static int fake_state_of_charge = -1;
@@ -112,6 +124,12 @@ static int update_static_battery_info(void)
 	 */
 	int rv;
 
+	/*
+	 * We're updating multi-byte memmap vars, don't allow ACPI to do
+	 * reads while we're updating.
+	 */
+	host_lock_memmap();
+
 	/* Smart battery serial number is 16 bits */
 	batt_str = (char *)host_get_memmap(EC_MEMMAP_BATT_SERIAL);
 	memset(batt_str, 0, EC_MEMMAP_TEXT_MAX);
@@ -155,8 +173,11 @@ static int update_static_battery_info(void)
 	*(int *)host_get_memmap(EC_MEMMAP_BATT_LFCC) = 0;
 	*host_get_memmap(EC_MEMMAP_BATT_FLAG) = 0;
 
+	/* No more multi-byte memmap writes. */
+	host_unlock_memmap();
+
 	if (rv)
-		problem(PR_STATIC_UPDATE, 0);
+		problem(PR_STATIC_UPDATE, rv);
 	else
 		/* No errors seen. Battery data is now present */
 		*host_get_memmap(EC_MEMMAP_BATTERY_VERSION) = 1;
@@ -199,6 +220,12 @@ static void update_dynamic_battery_info(void)
 		batt_present = 0;
 	}
 
+	/*
+	 * We're updating multi-byte memmap vars, don't allow ACPI to do
+	 * reads while we're updating.
+	 */
+	host_lock_memmap();
+
 	if (!(curr.batt.flags & BATT_FLAG_BAD_VOLTAGE))
 		*memmap_volt = curr.batt.voltage;
 
@@ -224,6 +251,9 @@ static void update_dynamic_battery_info(void)
 		/* Poke the AP if the full_capacity changes. */
 		send_batt_info_event++;
 	}
+
+	/* No more multi-byte memmap writes. */
+	host_unlock_memmap();
 
 	if (curr.batt.is_present == BP_YES &&
 	    !(curr.batt.flags & BATT_FLAG_BAD_STATE_OF_CHARGE) &&
@@ -289,6 +319,7 @@ static void dump_charge_state(void)
 	ccprintf("battery_seems_to_be_dead = %d\n", battery_seems_to_be_dead);
 	ccprintf("battery_seems_to_be_disconnected = %d\n",
 		 battery_seems_to_be_disconnected);
+	ccprintf("battery_was_removed = %d\n", battery_was_removed);
 	ccprintf("debug output = %s\n", debugging ? "on" : "off");
 #undef DUMP
 }
@@ -639,6 +670,8 @@ void charger_task(void)
 		if (curr.batt.is_present == BP_NO) {
 			ASSERT(curr.ac);	/* How are we running? */
 			curr.state = ST_IDLE;
+			curr.batt_is_charging = 0;
+			battery_was_removed = 1;
 			goto wait_for_it;
 		}
 
@@ -741,15 +774,16 @@ void charger_task(void)
 			} else
 #endif
 			if (curr.state == ST_PRECHARGE ||
-			    battery_seems_to_be_dead) {
+			    battery_seems_to_be_dead ||
+			    battery_was_removed) {
 				CPRINTS("battery woke up");
 
 				/* Update the battery-specific values */
 				batt_info = battery_get_info();
 				need_static = 1;
-			}
+			    }
 
-			battery_seems_to_be_dead = 0;
+			battery_seems_to_be_dead = battery_was_removed = 0;
 			curr.state = ST_CHARGE;
 		}
 
@@ -898,7 +932,7 @@ enum charge_state charge_get_state(void)
 {
 	switch (curr.state) {
 	case ST_IDLE:
-		if (battery_seems_to_be_dead)
+		if (battery_seems_to_be_dead || battery_was_removed)
 			return PWR_STATE_ERROR;
 		return PWR_STATE_IDLE;
 	case ST_DISCHARGE:

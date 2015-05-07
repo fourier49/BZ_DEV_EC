@@ -21,6 +21,80 @@
 #include "usb_pd_config.h"
 #include "util.h"
 
+void button_event(enum gpio_signal signal);
+void hpd_event(enum gpio_signal signal);
+void vbus_event(enum gpio_signal signal);
+#include "gpio_list.h"
+
+static volatile uint64_t hpd_prev_ts;
+static volatile int hpd_prev_level;
+static volatile int hpd_possible_irq;
+
+static int sn75dp130_dpcd_init(void);
+
+/**
+ * Hotplug detect deferred task
+ *
+ * Called after level change on hpd GPIO to evaluate (and debounce) what event
+ * has occurred.  There are 3 events that occur on HPD:
+ *    1. low  : downstream display sink is deattached
+ *    2. high : downstream display sink is attached
+ *    3. irq  : downstream display sink signalling an interrupt.
+ *
+ * The debounce times for these various events are:
+ *  100MSEC : min pulse width of level value.
+ *    2MSEC : min pulse width of IRQ low pulse.  Max is level debounce min.
+ *
+ * lvl(n-2) lvl(n-1)  lvl   prev_delta  now_delta event
+ * ----------------------------------------------------
+ * 1        0         1     <2ms        n/a       low glitch (ignore)
+ * 1        0         1     >2ms        <100ms    irq
+ * x        0         1     n/a         >100ms    high
+ * 0        1         0     <100ms      n/a       high glitch (ignore)
+ * x        1         0     n/a         >100ms    low
+ */
+
+void hpd_lvl_deferred(void)
+{
+	int level = gpio_get_level(GPIO_DPSRC_HPD);
+	int dp_mode = !gpio_get_level(GPIO_USBC_SS_USB_MODE);
+
+	if (level != hpd_prev_level) {
+		/* Stable level changed. Send HPD event */
+		hpd_prev_level = level;
+		if (dp_mode)
+			pd_send_hpd(0, level ? hpd_high : hpd_low);
+		/* Configure redriver's back side */
+		if (level)
+			sn75dp130_dpcd_init();
+
+	}
+
+	/* Send queued IRQ if the cable is attached */
+	if (hpd_possible_irq && level && dp_mode)
+		pd_send_hpd(0, hpd_irq);
+	hpd_possible_irq = 0;
+
+}
+DECLARE_DEFERRED(hpd_lvl_deferred);
+
+void hpd_event(enum gpio_signal signal)
+{
+	timestamp_t now = get_time();
+	int level = gpio_get_level(signal);
+	uint64_t cur_delta = now.val - hpd_prev_ts;
+
+	/* Record low pulse */
+	if (cur_delta >= HPD_DEBOUNCE_IRQ && level)
+		hpd_possible_irq = 1;
+
+	/* store current time */
+	hpd_prev_ts = now.val;
+
+	/* All previous hpd level events need to be re-triggered */
+	hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
+}
+
 /* Debounce time for voltage buttons */
 #define BUTTON_DEBOUNCE_US (100 * MSEC)
 
@@ -75,6 +149,18 @@ static void set_usbc_action(enum usbc_action act)
 		was_usb_mode = gpio_get_level(GPIO_USBC_SS_USB_MODE);
 		gpio_set_level(GPIO_USBC_SS_USB_MODE, !was_usb_mode);
 		gpio_set_level(GPIO_CASE_CLOSE_EN, !was_usb_mode);
+		if (!gpio_get_level(GPIO_DPSRC_HPD))
+			break;
+		/*
+		 * DP cable is connected. Send HPD event according to USB/DP
+		 * mux state.
+		 */
+		if (!was_usb_mode) {
+			pd_send_hpd(0, hpd_low);
+		} else {
+			pd_send_hpd(0, hpd_high);
+			pd_send_hpd(0, hpd_irq);
+		}
 		break;
 	case USBC_ACT_USB_EN:
 		gpio_set_level(GPIO_USBC_SS_USB_MODE, 1);
@@ -98,9 +184,24 @@ static void set_usbc_action(enum usbc_action act)
 	}
 }
 
+/* has Pull-up */
+static int prev_dbg20v = 1;
+static void button_dbg20v_deferred(void);
+static void enable_dbg20v_poll(void)
+{
+	hook_call_deferred(button_dbg20v_deferred, 10 * MSEC);
+}
+
 /* Handle debounced button press */
 static void button_deferred(void)
 {
+	if (button_pressed == GPIO_DBG_20V_TO_DUT_L) {
+		enable_dbg20v_poll();
+		if (gpio_get_level(GPIO_DBG_20V_TO_DUT_L) == prev_dbg20v)
+			return;
+		else
+			prev_dbg20v = !prev_dbg20v;
+	}
 	/* bounce ? */
 	if (gpio_get_level(button_pressed) != 0)
 		return;
@@ -120,6 +221,8 @@ static void button_deferred(void)
 		break;
 	case GPIO_DBG_USB_TOGGLE_L:
 		set_usbc_action(USBC_ACT_USBDP_TOGGLE);
+		if (gpio_get_level(GPIO_USBC_SS_USB_MODE))
+			board_maybe_reset_usb_hub();
 		break;
 	case GPIO_DBG_MUX_FLIP_L:
 		set_usbc_action(USBC_ACT_MUX_FLIP);
@@ -140,13 +243,20 @@ void button_event(enum gpio_signal signal)
 	hook_call_deferred(button_deferred, BUTTON_DEBOUNCE_US);
 }
 
+static void button_dbg20v_deferred(void)
+{
+	if (gpio_get_level(GPIO_DBG_20V_TO_DUT_L) == 0)
+		button_event(GPIO_DBG_20V_TO_DUT_L);
+	else
+		enable_dbg20v_poll();
+}
+DECLARE_DEFERRED(button_dbg20v_deferred);
+
 void vbus_event(enum gpio_signal signal)
 {
 	ccprintf("VBUS! =%d\n", gpio_get_level(signal));
 	task_wake(TASK_ID_PD);
 }
-
-#include "gpio_list.h"
 
 /* ADC channels */
 const struct adc_t adc_channels[] = {
@@ -163,20 +273,110 @@ const struct i2c_port_t i2c_ports[] = {
 };
 const unsigned int i2c_ports_used = ARRAY_SIZE(i2c_ports);
 
+/* 8-bit address */
+#define SN75DP130_I2C_ADDR 0x5c
+/*
+ * Pin number for active-high reset from PCA9534 to CMOS pull-down to
+ * SN75DP130's RSTN (active-low)
+ */
+#define REDRIVER_RST_PIN  0x1
+
+static int sn75dp130_i2c_write(uint8_t index, uint8_t value)
+{
+	return i2c_write8(I2C_PORT_MASTER, SN75DP130_I2C_ADDR, index, value);
+}
+
+/**
+ * Reset redriver.
+ *
+ * Note, MUST set SW15 to 'PD' in order to control i2c from PD-MCU.  This can
+ * NOT be done via software.
+ */
+static int sn75dp130_reset(void)
+{
+	int rv;
+
+	rv = pca9534_config_pin(I2C_PORT_MASTER, 0x40, REDRIVER_RST_PIN,
+				PCA9534_OUTPUT);
+	/* Assert (its active high) */
+	rv |= pca9534_set_level(I2C_PORT_MASTER, 0x40, REDRIVER_RST_PIN, 1);
+	/* datasheet recommends > 100usec */
+	usleep(200);
+
+	/* De-assert */
+	rv |= pca9534_set_level(I2C_PORT_MASTER, 0x40, REDRIVER_RST_PIN, 0);
+	/* datasheet recommends > 400msec */
+	usleep(450 * MSEC);
+	return rv;
+}
+
+static int sn75dp130_dpcd_init(void)
+{
+	int i, rv;
+
+	/* set upper & middle DPCD addr ... constant for writes below */
+	rv = sn75dp130_i2c_write(0x1c, 0x0);
+	rv |= sn75dp130_i2c_write(0x1d, 0x1);
+
+	/* link_bw_set: 5.4gbps */
+	rv |= sn75dp130_i2c_write(0x1e, 0x0);
+	rv |= sn75dp130_i2c_write(0x1f, 0x14);
+
+	/* lane_count_set: 4 */
+	rv |= sn75dp130_i2c_write(0x1e, 0x1);
+	rv |= sn75dp130_i2c_write(0x1f, 0x4);
+
+	/*
+	 * Force Link voltage level & pre-emphasis by writing each of the lane's
+	 * DPCD config registers 103-106h accordingly.
+	 */
+	for (i = 0x3; i < 0x7; i++) {
+		rv |= sn75dp130_i2c_write(0x1e, i);
+		rv |= sn75dp130_i2c_write(0x1f, 0x3);
+	}
+	return rv;
+}
+
+static int sn75dp130_redriver_init(void)
+{
+	int rv;
+
+	rv = sn75dp130_reset();
+
+	/* Disable squelch detect */
+	rv |= sn75dp130_i2c_write(0x3, 0x1a);
+	/* Disable link training on re-driver source side */
+	rv |= sn75dp130_i2c_write(0x4, 0x0);
+
+	/* Can only configure DPCD portion of redriver in presence of an HPD */
+	if (gpio_get_level(GPIO_DPSRC_HPD))
+		sn75dp130_dpcd_init();
+
+	return rv;
+}
+
 static void board_init(void)
 {
+	timestamp_t now = get_time();
+	hpd_prev_level = gpio_get_level(GPIO_DPSRC_HPD);
+	hpd_prev_ts = now.val;
+	gpio_enable_interrupt(GPIO_DPSRC_HPD);
+
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_VBUS_WAKE);
 
 	/* Enable button interrupts. */
 	gpio_enable_interrupt(GPIO_DBG_5V_TO_DUT_L);
 	gpio_enable_interrupt(GPIO_DBG_12V_TO_DUT_L);
-	gpio_enable_interrupt(GPIO_DBG_20V_TO_DUT_L);
 	gpio_enable_interrupt(GPIO_DBG_CHG_TO_DEV_L);
 	gpio_enable_interrupt(GPIO_DBG_USB_TOGGLE_L);
 	gpio_enable_interrupt(GPIO_DBG_MUX_FLIP_L);
 
+	/* TODO(crosbug.com/33761): poll DBG_20V_TO_DUT_L */
+	enable_dbg20v_poll();
+
 	ina2xx_init(0, 0x399f, INA2XX_CALIB_1MA(10 /* mOhm */));
+	sn75dp130_redriver_init();
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 

@@ -36,7 +36,6 @@ static int init_done;
 static struct ec_lpc_host_args * const lpc_host_args =
 	(struct ec_lpc_host_args *)mem_mapped;
 
-
 #ifdef CONFIG_KEYBOARD_IRQ_GPIO
 static void keyboard_irq_assert(void)
 {
@@ -193,13 +192,13 @@ static void setup_lpc(void)
 	gpio_config_module(MODULE_LPC, 1);
 
 	/* Set up interrupt on LRESET# deassert */
-	MEC1322_INT_SOURCE(19) |= 1 << 1;
+	MEC1322_INT_SOURCE(19) = 1 << 1;
 	MEC1322_INT_ENABLE(19) |= 1 << 1;
 	MEC1322_INT_BLK_EN |= 1 << 19;
 	task_enable_irq(MEC1322_IRQ_GIRQ19);
 
 	/* Set up ACPI0 for 0x62/0x66 */
-	MEC1322_LPC_ACPI_EC0_BAR = 0x00628034;
+	MEC1322_LPC_ACPI_EC0_BAR = 0x00628304;
 	MEC1322_INT_ENABLE(15) |= 1 << 6;
 	MEC1322_INT_BLK_EN |= 1 << 15;
 	task_enable_irq(MEC1322_IRQ_ACPIEC0_IBF);
@@ -212,6 +211,10 @@ static void setup_lpc(void)
 
 	/* Set up 8042 interface at 0x60/0x64 */
 	MEC1322_LPC_8042_BAR = 0x00608104;
+
+	/* Set up indication of Auxillary sts */
+	MEC1322_8042_KB_CTRL |= 1 << 7;
+
 	MEC1322_8042_ACT |= 1;
 	MEC1322_INT_ENABLE(15) |= ((1 << 13) | (1 << 14));
 	MEC1322_INT_BLK_EN |= 1 << 15;
@@ -220,11 +223,25 @@ static void setup_lpc(void)
 
 	/* TODO(crosbug.com/p/24107): Route KIRQ to SER_IRQ1 */
 
-	/* Set up EMI module for memory mapped region and port 80 */
-	MEC1322_LPC_EMI_BAR = 0x0080800f;
+	/* Set up EMI module for memory mapped region, base address 0x800 */
+	MEC1322_LPC_EMI_BAR = 0x0800800f;
 	MEC1322_INT_ENABLE(15) |= 1 << 2;
 	MEC1322_INT_BLK_EN |= 1 << 15;
 	task_enable_irq(MEC1322_IRQ_EMI);
+
+	/* Access data RAM through alias address */
+	MEC1322_EMI_MBA0 = (uint32_t)mem_mapped - 0x118000 + 0x20000000;
+
+	/*
+	 * Limit EMI read / write range. First 256 bytes are RW for host
+	 * commands. Second 256 bytes are RO for mem-mapped data.
+	 */
+	MEC1322_EMI_MRL0 = 0x200;
+	MEC1322_EMI_MWL0 = 0x100;
+
+	/* Set up Mailbox for Port80 trapping */
+	MEC1322_MBX_INDEX = 0xff;
+	MEC1322_LPC_MAILBOX_BAR = 0x00808901;
 
 	/* We support LPC args and version 3 protocol */
 	*(lpc_get_memmap_range() + EC_MEMMAP_HOST_CMD_FLAGS) =
@@ -270,7 +287,7 @@ void girq19_interrupt(void)
 			lpc_get_pltrst_asserted() ? "" : "de");
 
 		/* Clear interrupt source */
-		MEC1322_INT_SOURCE(19) |= 1 << 1;
+		MEC1322_INT_SOURCE(19) = 1 << 1;
 	}
 }
 DECLARE_IRQ(MEC1322_IRQ_GIRQ19, girq19_interrupt, 1);
@@ -280,6 +297,29 @@ void emi_interrupt(void)
 	port_80_write(MEC1322_EMI_H2E_MBX);
 }
 DECLARE_IRQ(MEC1322_IRQ_EMI, emi_interrupt, 1);
+
+#ifdef HAS_TASK_PORT80
+/*
+ * Port80 POST code polling limitation:
+ * - POST code 0xFF is ignored.
+ */
+int port_80_read(void)
+{
+	int data;
+
+	/* read MBX_INDEX for POST code */
+	data = MEC1322_MBX_INDEX;
+
+	/* clear MBX_INDEX for next POST code*/
+	MEC1322_MBX_INDEX = 0xff;
+
+	/* mark POST code 0xff as invalid */
+	if (data == 0xff)
+		data = PORT_80_IGNORE;
+
+	return data;
+}
+#endif
 
 void acpi_0_interrupt(void)
 {
@@ -449,6 +489,16 @@ uint32_t lpc_get_host_event_mask(enum lpc_host_event_type type)
 	return event_mask[type];
 }
 
+void lpc_set_acpi_status_mask(uint8_t mask)
+{
+	MEC1322_ACPI_EC_STATUS(0) |= mask;
+}
+
+void lpc_clear_acpi_status_mask(uint8_t mask)
+{
+	MEC1322_ACPI_EC_STATUS(0) &= ~mask;
+}
+
 int lpc_get_pltrst_asserted(void)
 {
 	return (MEC1322_LPC_BUS_MONITOR & (1<<1)) ? 1 : 0;
@@ -461,3 +511,22 @@ static int lpc_command_init(int argc, char **argv)
 	return EC_SUCCESS;
 }
 DECLARE_CONSOLE_COMMAND(lpcinit, lpc_command_init, NULL, NULL, NULL);
+
+/* Get protocol information */
+static int lpc_get_protocol_info(struct host_cmd_handler_args *args)
+{
+	struct ec_response_get_protocol_info *r = args->response;
+
+	memset(r, 0, sizeof(*r));
+	r->protocol_versions = (1 << 3);
+	r->max_request_packet_size = EC_LPC_HOST_PACKET_SIZE;
+	r->max_response_packet_size = EC_LPC_HOST_PACKET_SIZE;
+	r->flags = 0;
+
+	args->response_size = sizeof(*r);
+
+	return EC_SUCCESS;
+}
+DECLARE_HOST_COMMAND(EC_CMD_GET_PROTOCOL_INFO,
+		lpc_get_protocol_info,
+		EC_VER_MASK(0));

@@ -3,7 +3,9 @@
  * found in the LICENSE file.
  */
 
+#include "config.h"
 #include "charge_manager.h"
+#include "charger.h"
 #include "common.h"
 #include "console.h"
 #include "gpio.h"
@@ -21,14 +23,14 @@
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
 
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,   900, PDO_FIXED_FLAGS),
+		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
 const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
-		PDO_BATT(5000, 20000, 10000),
-		PDO_VAR(5000, 20000, 3000),
+		PDO_BATT(4500, 14000, 10000),
+		PDO_VAR(4500, 14000, 3000),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
@@ -90,7 +92,8 @@ void pd_transition_voltage(int idx)
 int pd_set_power_supply_ready(int port)
 {
 	/* provide VBUS */
-	gpio_set_level(GPIO_USBC_5V_EN, 1);
+	gpio_set_level(GPIO_CHGR_OTG, 1);
+	charger_enable_otg_power(1);
 
 	return EC_SUCCESS; /* we are ready */
 }
@@ -98,7 +101,8 @@ int pd_set_power_supply_ready(int port)
 void pd_power_supply_reset(int port)
 {
 	/* Kill VBUS */
-	gpio_set_level(GPIO_USBC_5V_EN, 0);
+	charger_enable_otg_power(0);
+	gpio_set_level(GPIO_CHGR_OTG, 0);
 }
 
 int pd_board_checks(void)
@@ -119,11 +123,11 @@ int pd_check_data_swap(int port, int data_role)
 	return 1;
 }
 
-void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+void pd_check_pr_role(int port, int pr_role, int flags)
 {
 }
 
-void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
+void pd_check_dr_role(int port, int dr_role, int flags)
 {
 }
 

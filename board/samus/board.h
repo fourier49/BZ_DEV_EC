@@ -77,6 +77,9 @@
 	(EC_WIRELESS_SWITCH_WLAN | EC_WIRELESS_SWITCH_WLAN_POWER)
 /* Do we want EC_WIRELESS_SWITCH_WWAN as well? */
 
+#undef  DEFERRABLE_MAX_COUNT
+#define DEFERRABLE_MAX_COUNT 9
+
 #ifndef __ASSEMBLER__
 
 /* I2C ports */
@@ -190,14 +193,14 @@ void bkboost_det_interrupt(enum gpio_signal signal);
 void set_pp5000_in_g3(int mask, int enable);
 
 /* Define for sensor tasks */
-#define CONFIG_SENSOR_BATTERY_TAP 0
+#define CONFIG_GESTURE_SENSOR_BATTERY_TAP 0
 #define CONFIG_GESTURE_TAP_OUTER_WINDOW_T 200
 #define CONFIG_GESTURE_TAP_INNER_WINDOW_T 30
 #define CONFIG_GESTURE_TAP_MIN_INTERSTICE_T 120
 #define CONFIG_GESTURE_TAP_MAX_INTERSTICE_T 500
 
-#define CONFIG_SENSOR_BASE 0
-#define CONFIG_SENSOR_LID 1
+#define CONFIG_LID_ANGLE_SENSOR_BASE 0
+#define CONFIG_LID_ANGLE_SENSOR_LID 1
 
 #endif /* !__ASSEMBLER__ */
 

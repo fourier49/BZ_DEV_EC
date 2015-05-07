@@ -180,7 +180,9 @@ int pd_find_preamble(int port)
 		if (all == 0x36db6db6)
 			return bit - 1; /* should be SYNC-1 */
 		if (all == 0xF33F3F3F)
-			return -2; /* got HARD-RESET */
+			return PD_RX_ERR_HARD_RESET; /* got HARD-RESET */
+		if (all == 0x3c7fe0ff)
+			return PD_RX_ERR_CABLE_RESET; /* got CABLE-RESET */
 	}
 	return -1;
 }
@@ -282,11 +284,6 @@ void pd_tx_spi_init(int port)
 		 | STM32_SPI_CR1_BIDIOE | STM32_SPI_CR1_CPHA;
 }
 
-void pd_tx_set_circular_mode(int port)
-{
-	pd_phy[port].dma_tx_option.flags |= STM32_DMA_CCR_CIRC;
-}
-
 static void tx_dma_done(void *data)
 {
 	int port = (int)data;
@@ -313,12 +310,14 @@ int pd_start_tx(int port, int polarity, int bit_len)
 {
 	stm32_dma_chan_t *tx = dma_get_channel(DMAC_SPI_TX(port));
 
+#ifndef CONFIG_USB_PD_TX_PHY_ONLY
 	/* disable RX detection interrupt */
 	pd_rx_disable_monitoring(port);
 
 	/* Check that we are not receiving a frame to avoid collisions */
 	if (pd_rx_started(port))
 		return -5;
+#endif /* !CONFIG_USB_PD_TX_PHY_ONLY */
 
 	/* Initialize spi peripheral to prepare for transmission. */
 	pd_tx_spi_init(port);
@@ -340,8 +339,12 @@ int pd_start_tx(int port, int polarity, int bit_len)
 	dma_clear_isr(DMAC_SPI_TX(port));
 #if defined(CONFIG_COMMON_RUNTIME) && defined(CONFIG_DMA_DEFAULT_HANDLERS)
 	tx_dma_polarities[port] = polarity;
-	dma_enable_tc_interrupt_callback(DMAC_SPI_TX(port), &tx_dma_done,
-					 (void *)port);
+	if (!(pd_phy[port].dma_tx_option.flags & STM32_DMA_CCR_CIRC)) {
+		/* Only enable interrupt if not in circular mode */
+		dma_enable_tc_interrupt_callback(DMAC_SPI_TX(port),
+						 &tx_dma_done,
+						 (void *)port);
+	}
 #endif
 	dma_go(tx);
 
@@ -377,6 +380,22 @@ void pd_tx_done(int port, int polarity)
 
 	/* Reset SPI to clear remaining data in buffer */
 	pd_tx_spi_reset(port);
+}
+
+void pd_tx_set_circular_mode(int port)
+{
+	pd_phy[port].dma_tx_option.flags |= STM32_DMA_CCR_CIRC;
+}
+
+void pd_tx_clear_circular_mode(int port)
+{
+	/* clear the circular mode bit in flag variable */
+	pd_phy[port].dma_tx_option.flags &= ~STM32_DMA_CCR_CIRC;
+	/* disable dma transaction underway */
+	dma_disable(DMAC_SPI_TX(port));
+#if defined(CONFIG_COMMON_RUNTIME) && defined(CONFIG_DMA_DEFAULT_HANDLERS)
+	tx_dma_done((void *)port);
+#endif
 }
 
 /* --- RX operation using comparator linked to timer --- */
@@ -489,62 +508,14 @@ void pd_hw_release(int port)
 }
 
 /* --- Startup initialization --- */
-void pd_hw_init(int port, int role)
+
+void pd_hw_init_rx(int port)
 {
 	struct pd_physical *phy = &pd_phy[port];
-	uint32_t val;
-
-	/* Initialize all PD pins to default state based on desired role */
-	pd_config_init(port, role);
-
-	/* set 40 MHz pin speed on communication pins */
-	pd_set_pins_speed(port);
-
-	/* --- SPI init --- */
-
-	/* Enable clocks to SPI module */
-	spi_enable_clock(port);
-
-	/* Initialize SPI peripheral registers */
-	pd_tx_spi_init(port);
-
-	/* configure TX DMA */
-	phy->dma_tx_option.channel = DMAC_SPI_TX(port);
-	phy->dma_tx_option.periph = (void *)&SPI_REGS(port)->dr;
-	phy->dma_tx_option.flags = STM32_DMA_CCR_MSIZE_8_BIT |
-				    STM32_DMA_CCR_PSIZE_8_BIT;
-	dma_prepare_tx(&(phy->dma_tx_option), PD_MAX_RAW_SIZE,
-			phy->raw_samples);
 
 	/* configure registers used for timers */
-	phy->tim_tx = (void *)TIM_REG_TX(port);
 	phy->tim_rx = (void *)TIM_REG_RX(port);
 
-	/* --- set the TX timer with updates at 600KHz (BMC frequency) --- */
-	__hw_timer_enable_clock(TIM_CLOCK_PD_TX(port), 1);
-	/* Timer configuration */
-	phy->tim_tx->cr1 = 0x0000;
-	phy->tim_tx->cr2 = 0x0000;
-	phy->tim_tx->dier = 0x0000;
-	/* Auto-reload value : 600000 Khz overflow */
-	phy->tim_tx->arr = TX_CLOCK_DIV;
-	/* 50% duty cycle on the output */
-	phy->tim_tx->ccr[TIM_TX_CCR_IDX(port)] = phy->tim_tx->arr / 2;
-	/* Timer channel output configuration */
-	val = (6 << 4) | (1 << 3);
-	if ((TIM_TX_CCR_IDX(port) & 1) == 0) /* CH2 or CH4 */
-		val <<= 8;
-	if (TIM_TX_CCR_IDX(port) <= 2)
-		phy->tim_tx->ccmr1 = val;
-	else
-		phy->tim_tx->ccmr2 = val;
-	phy->tim_tx->ccer = 1 << ((TIM_TX_CCR_IDX(port) - 1) * 4);
-	phy->tim_tx->bdtr = 0x8000;
-	/* set prescaler to /1 */
-	phy->tim_tx->psc = 0;
-	/* Reload the pre-scaler and reset the counter */
-	phy->tim_tx->egr = 0x0001;
-#ifndef CONFIG_USB_PD_TX_PHY_ONLY
 	/* configure RX DMA */
 	phy->dma_tim_option.channel = DMAC_TIM_RX(port);
 	phy->dma_tim_option.periph = (void *)(TIM_RX_CCR_REG(port));
@@ -625,6 +596,65 @@ void pd_hw_init(int port, int role)
 	EXTI_XTSR |= EXTI_COMP_MASK(port);
 	STM32_EXTI_IMR |= EXTI_COMP_MASK(port);
 	task_enable_irq(IRQ_COMP);
+}
+
+void pd_hw_init(int port, int role)
+{
+	struct pd_physical *phy = &pd_phy[port];
+	uint32_t val;
+
+	/* Initialize all PD pins to default state based on desired role */
+	pd_config_init(port, role);
+
+	/* set 40 MHz pin speed on communication pins */
+	pd_set_pins_speed(port);
+
+	/* --- SPI init --- */
+
+	/* Enable clocks to SPI module */
+	spi_enable_clock(port);
+
+	/* Initialize SPI peripheral registers */
+	pd_tx_spi_init(port);
+
+	/* configure TX DMA */
+	phy->dma_tx_option.channel = DMAC_SPI_TX(port);
+	phy->dma_tx_option.periph = (void *)&SPI_REGS(port)->dr;
+	phy->dma_tx_option.flags = STM32_DMA_CCR_MSIZE_8_BIT |
+				    STM32_DMA_CCR_PSIZE_8_BIT;
+	dma_prepare_tx(&(phy->dma_tx_option), PD_MAX_RAW_SIZE,
+			phy->raw_samples);
+
+	/* configure registers used for timers */
+	phy->tim_tx = (void *)TIM_REG_TX(port);
+
+	/* --- set the TX timer with updates at 600KHz (BMC frequency) --- */
+	__hw_timer_enable_clock(TIM_CLOCK_PD_TX(port), 1);
+	/* Timer configuration */
+	phy->tim_tx->cr1 = 0x0000;
+	phy->tim_tx->cr2 = 0x0000;
+	phy->tim_tx->dier = 0x0000;
+	/* Auto-reload value : 600000 Khz overflow */
+	phy->tim_tx->arr = TX_CLOCK_DIV;
+	/* 50% duty cycle on the output */
+	phy->tim_tx->ccr[TIM_TX_CCR_IDX(port)] = phy->tim_tx->arr / 2;
+	/* Timer channel output configuration */
+	val = (6 << 4) | (1 << 3);
+	if ((TIM_TX_CCR_IDX(port) & 1) == 0) /* CH2 or CH4 */
+		val <<= 8;
+	if (TIM_TX_CCR_IDX(port) <= 2)
+		phy->tim_tx->ccmr1 = val;
+	else
+		phy->tim_tx->ccmr2 = val;
+	phy->tim_tx->ccer = 1 << ((TIM_TX_CCR_IDX(port) - 1) * 4);
+	phy->tim_tx->bdtr = 0x8000;
+	/* set prescaler to /1 */
+	phy->tim_tx->psc = 0;
+	/* Reload the pre-scaler and reset the counter */
+	phy->tim_tx->egr = 0x0001;
+#ifndef CONFIG_USB_PD_TX_PHY_ONLY
+	/* Configure the reception side : comparators + edge timer + DMA */
+	pd_hw_init_rx(port);
 #endif /* CONFIG_USB_PD_TX_PHY_ONLY */
 
 	CPRINTS("USB PD initialized");

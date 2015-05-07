@@ -10,6 +10,12 @@
 
 #include "timer.h"
 
+/*
+ * Time to delay for detecting the charger type (must be long enough for BC1.2
+ * driver to get supplier information and notify charge manager).
+ */
+#define CHARGE_DETECT_DELAY (2*SECOND)
+
 /* Charge ramp state used for checking VBUS */
 enum chg_ramp_vbus_state {
 	CHG_RAMP_VBUS_RAMPING,
@@ -57,6 +63,20 @@ int board_is_vbus_too_low(enum chg_ramp_vbus_state ramp_state);
  * Active input current limit (mA)
  */
 int chg_ramp_get_current_limit(void);
+
+/**
+ * Return if charge ramping has reached stable state
+ *
+ * @return 1 if stable, 0 otherwise
+ */
+int chg_ramp_is_stable(void);
+
+/**
+ * Return if charge ramping has reached detected state
+ *
+ * @return 1 if detected, 0 otherwise
+ */
+int chg_ramp_is_detected(void);
 
 #ifdef HAS_TASK_CHG_RAMP
 /**

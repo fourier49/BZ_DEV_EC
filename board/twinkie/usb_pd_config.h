@@ -140,12 +140,14 @@ static inline void pd_tx_init(void)
 {
 	gpio_config_module(MODULE_USB_PD, 1);
 
+#ifndef CONFIG_USB_PD_TX_PHY_ONLY
 	/* Detect when VBUS crosses the 4.5V threshold (1.25mV/bit) */
 	ina2xx_write(0, INA2XX_REG_ALERT, 4500 * 100 / 125);
 	ina2xx_write(0, INA2XX_REG_MASK, INA2XX_MASK_EN_BOL);
 	/* start as a power consumer */
 	gpio_set_level(GPIO_CC1_RD, 0);
 	gpio_set_level(GPIO_CC2_RD, 0);
+#endif /* CONFIG_USB_PD_TX_PHY_ONLY */
 }
 
 static inline void pd_set_host_mode(int port, int enable)
@@ -167,11 +169,10 @@ static inline void pd_set_host_mode(int port, int enable)
 
 static inline void pd_config_init(int port, uint8_t power_role)
 {
-	/*
-	 * Set CC pull resistors, and charge_en and vbus_en GPIOs to match
-	 * the initial role.
-	 */
+#ifndef CONFIG_USB_PD_TX_PHY_ONLY
+	/* Set CC pull resistors */
 	pd_set_host_mode(port, power_role);
+#endif /* CONFIG_USB_PD_TX_PHY_ONLY */
 
 	/* Initialize TX pins and put them in Hi-Z */
 	pd_tx_init();

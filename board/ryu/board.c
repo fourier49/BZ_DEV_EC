@@ -24,10 +24,12 @@
 #include "power.h"
 #include "power_button.h"
 #include "registers.h"
+#include "spi.h"
 #include "task.h"
 #include "usb.h"
 #include "usb_pd.h"
 #include "usb_pd_config.h"
+#include "usb_spi.h"
 #include "usb-stm32f3.h"
 #include "usb-stream.h"
 #include "usart-stm32f3.h"
@@ -47,6 +49,12 @@
 
 static int charge_current_limit;
 
+/*
+ * Store the state of our USB data switches so that they can be restored
+ * after pericom reset.
+ */
+static int usb_switch_state;
+
 static void vbus_log(void)
 {
 	CPRINTS("VBUS %d", gpio_get_level(GPIO_CHGR_ACOK));
@@ -62,7 +70,7 @@ void vbus_evt(enum gpio_signal signal)
 	 * If VBUS is low, or VBUS is high and we are not outputting VBUS
 	 * ourselves, then update the VBUS supplier.
 	 */
-	if (!vbus_level || !gpio_get_level(GPIO_USBC_5V_EN)) {
+	if (!vbus_level || !gpio_get_level(GPIO_CHGR_OTG)) {
 		charge.voltage = USB_BC12_CHARGE_VOLTAGE;
 		charge.current = vbus_level ? DEFAULT_CURR_LIMIT : 0;
 		charge_manager_update_charge(CHARGE_SUPPLIER_VBUS, 0, &charge);
@@ -102,6 +110,13 @@ void usb_charger_task(void)
 
 			/* Trigger chip reset to refresh detection registers */
 			pi3usb9281_reset(0);
+			/*
+			 * Restore data switch settings - switches return to
+			 * closed on reset until restored.
+			 */
+			if (usb_switch_state)
+				pi3usb9281_set_switches(0, 1);
+
 			/* Clear possible disconnect interrupt */
 			pi3usb9281_get_interrupts(0);
 			/* Mask attach interrupt */
@@ -305,6 +320,16 @@ static void board_init(void)
 
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_CHGR_ACOK);
+
+	/*
+	 * TODO(crosbug.com/p/38689) Workaround for PMIC issue on P5.
+	 * remove when P5 are de-commissioned.
+	 * We are re-using EXTINT1 for the new power sequencing workaround
+	 * this is killing the base closing detection on P5
+	 * we won't charge it.
+	 */
+	if (board_get_version() == 5)
+		gpio_enable_interrupt(GPIO_HPD_IN);
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 
@@ -315,6 +340,16 @@ const struct power_signal_info power_signal_list[] = {
 };
 BUILD_ASSERT(ARRAY_SIZE(power_signal_list) == POWER_SIGNAL_COUNT);
 
+/*
+ * TODO(crosbug.com/p/38689) Workaround for MAX77620 PMIC EN_PP3300 issue.
+ * remove when P5 are de-commissioned.
+ */
+void pp1800_on_off_evt(enum gpio_signal signal)
+{
+	int level = gpio_get_level(signal);
+	gpio_set_level(GPIO_EN_PP3300_RSVD, level);
+}
+
 /* ADC channels */
 const struct adc_t adc_channels[] = {
 	/* Vbus sensing. Converted to mV, /10 voltage divider. */
@@ -322,9 +357,6 @@ const struct adc_t adc_channels[] = {
 	/* USB PD CC lines sensing. Converted to mV (3000mV/4096). */
 	[ADC_CC1_PD] = {"CC1_PD", 3000, 4096, 0, STM32_AIN(1)},
 	[ADC_CC2_PD] = {"CC2_PD", 3000, 4096, 0, STM32_AIN(3)},
-	/* Charger current sensing. Converted to mA. */
-	[ADC_IADP] = {"IADP",  7500, 4096, 0, STM32_AIN(8)},
-	[ADC_IBAT] = {"IBAT", 37500, 4096, 0, STM32_AIN(13)},
 };
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
@@ -350,53 +382,61 @@ const struct i2c_port_t i2c_ports[] = {
 };
 const unsigned int i2c_ports_used = ARRAY_SIZE(i2c_ports);
 
-void board_set_usb_mux(int port, enum typec_mux mux, int polarity)
+static void board_set_usb_switches(int port, int open)
+{
+	/* If switch is not changing, then return */
+	if (open == usb_switch_state)
+		return;
+
+	usb_switch_state = open;
+	pi3usb9281_set_switches(port, open);
+}
+
+void board_set_usb_mux(int port, enum typec_mux mux,
+		       enum usb_switch usb, int polarity)
 {
 	/* reset everything */
-	gpio_set_level(GPIO_USBC_SS_EN_L, 1);
-	gpio_set_level(GPIO_USBC_DP_MODE_L, 1);
-	gpio_set_level(GPIO_USBC_DP_POLARITY, 1);
-	gpio_set_level(GPIO_USBC_SS1_USB_MODE_L, 1);
-	gpio_set_level(GPIO_USBC_SS2_USB_MODE_L, 1);
+	gpio_set_level(GPIO_USBC_MUX_CONF0, 0);
+	gpio_set_level(GPIO_USBC_MUX_CONF1, 0);
+	gpio_set_level(GPIO_USBC_MUX_CONF2, 0);
+
+	/* Set D+/D- switch to appropriate level */
+	board_set_usb_switches(port, usb);
 
 	if (mux == TYPEC_MUX_NONE)
 		/* everything is already disabled, we can return */
 		return;
 
-	if (mux == TYPEC_MUX_USB || mux == TYPEC_MUX_DOCK) {
-		/* USB 3.0 uses 2 superspeed lanes */
-		gpio_set_level(polarity ? GPIO_USBC_SS2_USB_MODE_L :
-					  GPIO_USBC_SS1_USB_MODE_L, 0);
-	}
+	gpio_set_level(GPIO_USBC_MUX_CONF0, polarity);
 
-	if (mux == TYPEC_MUX_DP || mux == TYPEC_MUX_DOCK) {
+	if (mux == TYPEC_MUX_USB || mux == TYPEC_MUX_DOCK)
+		/* USB 3.0 uses 2 superspeed lanes */
+		gpio_set_level(GPIO_USBC_MUX_CONF2, 1);
+
+	if (mux == TYPEC_MUX_DP || mux == TYPEC_MUX_DOCK)
 		/* DP uses available superspeed lanes (x2 or x4) */
-		gpio_set_level(GPIO_USBC_DP_POLARITY, polarity);
-		gpio_set_level(GPIO_USBC_DP_MODE_L, 0);
-	}
-	/* switch on superspeed lanes */
-	gpio_set_level(GPIO_USBC_SS_EN_L, 0);
+		gpio_set_level(GPIO_USBC_MUX_CONF1, 1);
 }
 
 int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 {
-	int has_ss = !gpio_get_level(GPIO_USBC_SS_EN_L);
-	int has_usb = !gpio_get_level(GPIO_USBC_SS1_USB_MODE_L) ||
-		      !gpio_get_level(GPIO_USBC_SS2_USB_MODE_L);
-	int has_dp = !gpio_get_level(GPIO_USBC_DP_MODE_L);
+	int has_usb, has_dp, polarity;
+
+	has_usb = gpio_get_level(GPIO_USBC_MUX_CONF2);
+	has_dp = gpio_get_level(GPIO_USBC_MUX_CONF1);
+	polarity = gpio_get_level(GPIO_USBC_MUX_CONF0);
 
 	if (has_dp)
-		*dp_str = gpio_get_level(GPIO_USBC_DP_POLARITY) ? "DP2" : "DP1";
+		*dp_str = polarity ? "DP2" : "DP1";
 	else
 		*dp_str = NULL;
 
 	if (has_usb)
-		*usb_str = gpio_get_level(GPIO_USBC_SS1_USB_MODE_L) ?
-				"USB2" : "USB1";
+		*usb_str = polarity ? "USB2" : "USB1";
 	else
 		*usb_str = NULL;
 
-	return has_ss;
+	return has_dp || has_usb;
 }
 
 /**
@@ -441,7 +481,7 @@ int board_set_active_charge_port(int charge_port)
 {
 	int ret = EC_SUCCESS;
 	/* check if we are source vbus on that port */
-	int source = gpio_get_level(GPIO_USBC_5V_EN);
+	int source = gpio_get_level(GPIO_CHGR_OTG);
 
 	if (charge_port >= 0 && charge_port < PD_PORT_COUNT && source) {
 		CPRINTS("Port %d is not a sink, skipping enable", charge_port);
@@ -472,47 +512,77 @@ void board_set_charge_limit(int charge_ma)
 }
 
 /**
- * Return whether ramping is allowed for given supplier
+ * Enable and disable SPI for case closed debugging.  This forces the AP into
+ * reset while SPI is enabled, thus preventing contention on the SPI interface.
  */
-int board_is_ramp_allowed(int supplier)
+void usb_spi_board_enable(struct usb_spi_config const *config)
 {
-	return supplier == CHARGE_SUPPLIER_BC12_DCP ||
-	       supplier == CHARGE_SUPPLIER_BC12_SDP ||
-	       supplier == CHARGE_SUPPLIER_BC12_CDP ||
-	       supplier == CHARGE_SUPPLIER_PROPRIETARY;
+	/* Place AP into reset */
+	gpio_set_level(GPIO_PMIC_WARM_RESET_L, 0);
+
+	/* Configure SPI GPIOs */
+	gpio_config_module(MODULE_SPI_MASTER, 1);
+	gpio_set_flags(GPIO_SPI_FLASH_NSS, GPIO_OUT_HIGH);
+
+	/* Set all four SPI pins to high speed */
+	STM32_GPIO_OSPEEDR(GPIO_B) |= 0xf03c0000;
+
+	/* Enable clocks to SPI2 module */
+	STM32_RCC_APB1ENR |= STM32_RCC_PB1_SPI2;
+
+	/* Reset SPI2 */
+	STM32_RCC_APB1RSTR |= STM32_RCC_PB1_SPI2;
+	STM32_RCC_APB1RSTR &= ~STM32_RCC_PB1_SPI2;
+
+	/* Enable SPI LDO to power the flash chip */
+	gpio_set_level(GPIO_VDDSPI_EN, 1);
+
+	spi_enable(1);
 }
 
-/**
- * Return the maximum allowed input current
- */
-int board_get_ramp_current_limit(int supplier, int sup_curr)
+void usb_spi_board_disable(struct usb_spi_config const *config)
 {
-	switch (supplier) {
-	case CHARGE_SUPPLIER_BC12_DCP:
-		return 2000;
-	case CHARGE_SUPPLIER_BC12_SDP:
-		return 1000;
-	case CHARGE_SUPPLIER_BC12_CDP:
-	case CHARGE_SUPPLIER_PROPRIETARY:
-		return sup_curr;
-	default:
-		return 500;
+	spi_enable(0);
+
+	/* Disable SPI LDO */
+	gpio_set_level(GPIO_VDDSPI_EN, 0);
+
+	/* Disable clocks to SPI2 module */
+	STM32_RCC_APB1ENR &= ~STM32_RCC_PB1_SPI2;
+
+	/* Release SPI GPIOs */
+	gpio_config_module(MODULE_SPI_MASTER, 0);
+	gpio_set_flags(GPIO_SPI_FLASH_NSS, GPIO_INPUT);
+
+	/* Release AP from reset */
+	gpio_set_level(GPIO_PMIC_WARM_RESET_L, 1);
+}
+
+int board_get_version(void)
+{
+	static int ver;
+
+	if (!ver) {
+		/*
+		 * read the board EC ID on the tristate strappings
+		 * using ternary encoding: 0 = 0, 1 = 1, Hi-Z = 2
+		 */
+		uint8_t id0 = 0, id1 = 0;
+		gpio_set_flags(GPIO_BOARD_ID0, GPIO_PULL_DOWN | GPIO_INPUT);
+		gpio_set_flags(GPIO_BOARD_ID1, GPIO_PULL_DOWN | GPIO_INPUT);
+		usleep(100);
+		id0 = gpio_get_level(GPIO_BOARD_ID0);
+		id1 = gpio_get_level(GPIO_BOARD_ID1);
+		gpio_set_flags(GPIO_BOARD_ID0, GPIO_PULL_UP | GPIO_INPUT);
+		gpio_set_flags(GPIO_BOARD_ID1, GPIO_PULL_UP | GPIO_INPUT);
+		usleep(100);
+		id0 = gpio_get_level(GPIO_BOARD_ID0) && !id0 ? 2 : id0;
+		id1 = gpio_get_level(GPIO_BOARD_ID1) && !id1 ? 2 : id1;
+		gpio_set_flags(GPIO_BOARD_ID0, GPIO_INPUT);
+		gpio_set_flags(GPIO_BOARD_ID1, GPIO_INPUT);
+		ver = id1 * 3 + id0;
+		CPRINTS("Board ID = %d\n", ver);
 	}
-}
 
-/**
- * Return if board is consuming full amount of input current
- */
-int board_is_consuming_full_charge(void)
-{
-	return adc_read_channel(ADC_IADP) >= charge_current_limit -
-					     IADP_ERROR_MARGIN_MA;
-}
-
-/**
- * Return if VBUS is sagging low enough that we should stop ramping
- */
-int board_is_vbus_too_low(enum chg_ramp_vbus_state ramp_state)
-{
-	return adc_read_channel(ADC_VBUS) < VBUS_LOW_THRESHOLD_MV;
+	return ver;
 }
