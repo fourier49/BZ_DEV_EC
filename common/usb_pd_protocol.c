@@ -1879,6 +1879,12 @@ void pd_task(void)
 
 	/* Initialize PD protocol state variables for each port. */
 	pd[port].power_role = PD_ROLE_DEFAULT;
+#if 1  // BXU: temporarily turn it ON, until we sort out a clearer Role-Swapping code
+#ifdef CONFIG_BIZ_EMU_HOST
+	drp_state = PD_DRP_FORCE_SOURCE;
+#endif
+	pd_set_data_role(port, PD_ROLE_DEFAULT);
+#endif
 	pd[port].vdm_state = VDM_STATE_DONE;
 	pd[port].flags = 0;
 	set_state(port, PD_DEFAULT_STATE);
@@ -1893,6 +1899,11 @@ void pd_task(void)
 	pd_set_input_current_limit(port, 0, 0);
 	typec_set_input_current_limit(port, 0, 0);
 	charge_manager_update_dualrole(port, CAP_UNKNOWN);
+#endif
+
+#ifdef CONFIG_BIZ_EMU_HOST
+        gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 1);
+        gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 1);
 #endif
 
 	while (1) {
@@ -3470,7 +3481,7 @@ static int command_amode(int argc, char **argv)
 				2);            /* UFP connected */
 		pd_send_vdm(port, USB_SID_DISPLAYPORT,
 			CMD_DP_CONFIG | VDO_OPOS(pd_alt_mode(port, USB_SID_DISPLAYPORT)), data, 1);
-		board_set_usb_mux(port, (cmd==3)? TYPEC_MUX_DP : TYPEC_MUX_DOCK,
+		board_set_usb_mux(port, (cmd==3)? TYPEC_MUX_DP : TYPEC_MUX_DOCK, USB_SWITCH_CONNECT,
 			pd_get_polarity(port));
 		break;
 	default:
@@ -3483,7 +3494,7 @@ DECLARE_CONSOLE_COMMAND(amode, command_amode,
 			"<port> [enter|exit|2|4]",
 			"Control type-C DP Alt Mode Configuration",
 			NULL);
-#endif /* CONFIG_USBC_SS_MUX */
+#endif /* CONFIG_BIZ_EMU_HOST */
 
 #ifdef HAS_TASK_HOSTCMD
 

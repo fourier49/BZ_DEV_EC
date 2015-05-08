@@ -343,13 +343,18 @@ const struct usb_port_mux usb_muxes[] = {
 };
 //BUILD_ASSERT(ARRAY_SIZE(usb_muxes) == PD_PORT_COUNT);
 
-void board_set_usb_mux(int port, enum typec_mux mux, int polarity)
+void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int polarity)
 {
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 
 	/* reset everything */
 	gpio_set_level(usb_mux->dp_mode_l,    0);   // default: disable DP AUX
 	gpio_set_level(usb_mux->dp_2_4_lanes, 0);   // default: 2 lanes mode
+
+#if 0
+	/* Set D+/D- switch to appropriate level */
+	board_set_usb_switches(port, usb);
+#endif
 
 	if (mux == TYPEC_MUX_NONE)
 		/* everything is already disabled, we can return */

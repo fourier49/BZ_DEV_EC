@@ -6,28 +6,43 @@
  */
 
 //-------------------------------------------------------------------------------------
+// ALL GPIOs with interrupt handlers must be declared at the top of the gpio.inc
+//-------------------------------------------------------------------------------------
+#ifndef CONFIG_BIZ_EMU_HOST
+#if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
+GPIO_INT(USB_P0_DP_HPD,          A, 3,  GPIO_INT_BOTH, hpd_event)
+#endif
+GPIO_INT(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
+GPIO_INT(MCU_PWR_DC_IN_DET,      B, 5,  GPIO_INT_BOTH, pwr_in_event)
+#endif
+
+#ifdef CONFIG_BIZ_DUAL_CC
+GPIO_INT(USB_P1_VBUS_WAKE,       C, 10, GPIO_INT_BOTH, vbus1_evt)
+#endif
+
+//-------------------------------------------------------------------------------------
 // Dual CC configuration:
 //    port 0: UFP / plug
 //    port 1: DFP / receptacle
 //-------------------------------------------------------------------------------------
 /* CC Signal RX/TX Port 0 */
 #ifndef CONFIG_BIZ_EMU_HOST
-GPIO(USB_P0_CC_PD,           A, 0,  GPIO_ANALOG,   NULL)
-GPIO(USB_P0_CC_TX_DATA,      B, 4,  GPIO_OUT_LOW,  NULL)
-GPIO(USB_P0_CC_TX_EN,        B, 0,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P0_CC_PD,           A, 0,  GPIO_ANALOG)
+GPIO(USB_P0_CC_TX_DATA,      B, 4,  GPIO_OUT_LOW)
+GPIO(USB_P0_CC_TX_EN,        B, 0,  GPIO_OUT_LOW)
 #endif
-GPIO(USB_CCRX_REF,           A, 1,  GPIO_ANALOG,   NULL)
-GPIO(USB_CCRX_REF_OUT,       A, 4,  GPIO_ANALOG,   NULL)
+GPIO(USB_CCRX_REF,           A, 1,  GPIO_ANALOG)
+GPIO(USB_CCRX_REF_OUT,       A, 4,  GPIO_ANALOG)
 
 /* CC Signal RX/TX Port 1 */
 #ifdef CONFIG_BIZ_DUAL_CC
-GPIO(USB_P1_CC1_PD,          A, 2,  GPIO_ANALOG,   NULL)
-GPIO(USB_P1_CC2_PD,          A, 5,  GPIO_ANALOG,   NULL)
-GPIO(USB_P1_CC_TX_DATA,      B, 14, GPIO_OUT_LOW,  NULL)
-GPIO(USB_P1_CC_TX_EN,        A, 7,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P1_CC1_PD,          A, 2,  GPIO_ANALOG)
+GPIO(USB_P1_CC2_PD,          A, 5,  GPIO_ANALOG)
+GPIO(USB_P1_CC_TX_DATA,      B, 14, GPIO_OUT_LOW)
+GPIO(USB_P1_CC_TX_EN,        A, 7,  GPIO_OUT_LOW)
 
 /* USB CC1/CC2 Polarity (orientation) */
-GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW)
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -35,20 +50,16 @@ GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW,  NULL)
 //-------------------------------------------------------------------------------------
 /* USB/DP mux signals */
 #ifndef CONFIG_BIZ_EMU_HOST
-GPIO(USB_P0_DP_SS_LANE,      B, 7,  GPIO_OUT_LOW,  NULL)
-GPIO(USB_P0_SBU_ENABLE,      A, 15, GPIO_OUT_LOW,  NULL)
-#if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
-GPIO(USB_P0_DP_HPD,          A, 3,  GPIO_INT_BOTH, hpd_event)
-#endif
+GPIO(USB_P0_DP_SS_LANE,      B, 7,  GPIO_OUT_LOW)
+GPIO(USB_P0_SBU_ENABLE,      A, 15, GPIO_OUT_LOW)
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW,  NULL)   /* active HIGH */
-GPIO(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
+GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW)   /* active HIGH */
 
 /* UFP Power Provider */    
-GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
-GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Provider */
-GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Consumer */
+GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_HIGH)   /* active HIGH, PD Provider */
+GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH)   /* active HIGH, PD Provider */
+GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH)   /* active HIGH, PD Consumer */
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -56,39 +67,35 @@ GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH, NULL)   /* active HIGH, PD Co
 //-------------------------------------------------------------------------------------
 #ifdef CONFIG_BIZ_EMU_HOST
 /* USB/DP mux signals */
-GPIO(USB_P1_DP_SS_LANE,      A, 3,  GPIO_OUT_LOW,  NULL)
-GPIO(USB_P1_DP_HPD,          B, 0,  GPIO_OUT_LOW,  NULL)
-GPIO(USB_P1_SBU_ENABLE,      B, 2,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P1_DP_SS_LANE,      A, 3,  GPIO_OUT_LOW)
+GPIO(USB_P1_DP_HPD,          B, 0,  GPIO_OUT_LOW)
+GPIO(USB_P1_SBU_ENABLE,      B, 2,  GPIO_OUT_LOW)
 
 /* DFP VBUS/VCONN signals */
-GPIO(USB_P1_CC1_VCONN_EN,    B, 4,  GPIO_OUT_LOW,  NULL)   /* active HIGH */
-GPIO(USB_P1_CC2_VCONN_EN,    B, 5,  GPIO_OUT_LOW,  NULL)
+GPIO(USB_P1_CC1_VCONN_EN,    B, 4,  GPIO_OUT_LOW)   /* active HIGH */
+GPIO(USB_P1_CC2_VCONN_EN,    B, 5,  GPIO_OUT_LOW)
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
-GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_OUT_HIGH,  NULL)
-GPIO(USB_P1_CC2_PWROLE_SRC,  A, 6,  GPIO_OUT_HIGH,  NULL)
+GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_OUT_HIGH)
+GPIO(USB_P1_CC2_PWROLE_SRC,  A, 6,  GPIO_OUT_HIGH)
 
 /* DFP Power Provider */   
-GPIO(USB_P1_PWR_5V_EN,       B, 7,  GPIO_OUT_HIGH,  NULL)   /* DFP providing 5V  over VBUS to UFP, active HIGH */
-GPIO(USB_P1_PWR_20V_EN,      B, 6,  GPIO_OUT_LOW,  NULL)    /* DFP providing 20V over VBUS to UFP, active HIGH */
-GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW,  NULL)    /* DFP get power from VBUS by UFP,     active HIGH */
+GPIO(USB_P1_PWR_5V_EN,       B, 7,  GPIO_OUT_HIGH)   /* DFP providing 5V  over VBUS to UFP, active HIGH */
+GPIO(USB_P1_PWR_20V_EN,      B, 6,  GPIO_OUT_LOW)    /* DFP providing 20V over VBUS to UFP, active HIGH */
+GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)    /* DFP get power from VBUS by UFP,     active HIGH */
 #endif
 
-#ifdef CONFIG_BIZ_DUAL_CC
-GPIO(USB_P1_VBUS_WAKE,       C, 10, GPIO_INT_BOTH, vbus1_evt)
-#endif
-GPIO(MCU_DBG_TRIGGER,        C, 11, GPIO_OUT_LOW, NULL)
+GPIO(MCU_DBG_TRIGGER,        C, 11, GPIO_OUT_LOW)
 
 /* Misc signals */
 #ifndef CONFIG_BIZ_EMU_HOST
-GPIO(MCU_CHIPS_RESET_EN,     B, 11, GPIO_OUT_HIGH, NULL)
-GPIO(MCU_PWR_DC_IN_DET,      B, 5,  GPIO_INT_BOTH, pwr_in_event)
-GPIO(MCU_PWR_STDBY_HUB,      A, 7,  GPIO_OUT_HIGH, NULL)
-GPIO(MCU_PWR_STDBY_LAN,      B, 6,  GPIO_OUT_HIGH, NULL)
+GPIO(MCU_CHIPS_RESET_EN,     B, 11, GPIO_OUT_HIGH)
+GPIO(MCU_PWR_STDBY_HUB,      A, 7,  GPIO_OUT_HIGH)
+GPIO(MCU_PWR_STDBY_LAN,      B, 6,  GPIO_OUT_HIGH)
 #ifdef __BIZ_SPICLK_USE_PB9__
-GPIO(MCU_PWR_STDBY_DP,       B, 1,  GPIO_OUT_HIGH, NULL)
+GPIO(MCU_PWR_STDBY_DP,       B, 1,  GPIO_OUT_HIGH)
 #else
-GPIO(MCU_PWR_STDBY_DP,       B, 9,  GPIO_OUT_HIGH, NULL)
+GPIO(MCU_PWR_STDBY_DP,       B, 9,  GPIO_OUT_HIGH)
 #endif
 #endif
 
@@ -97,14 +104,14 @@ GPIO(MCU_PWR_STDBY_DP,       B, 9,  GPIO_OUT_HIGH, NULL)
  * I2C pins should be configured as inputs until I2C module is
  * initialized. This will avoid driving the lines unintentionally.
  */
-GPIO(SLAVE_I2C_SCL,          B, 6,  GPIO_INPUT,    NULL)
-GPIO(SLAVE_I2C_SDA,          B, 7,  GPIO_INPUT,    NULL)
-GPIO(MASTER_I2C_SCL,         B, 10, GPIO_INPUT,    NULL)
-GPIO(MASTER_I2C_SDA,         B, 11, GPIO_INPUT,    NULL)
+GPIO(SLAVE_I2C_SCL,          B, 6,  GPIO_INPUT)
+GPIO(SLAVE_I2C_SDA,          B, 7,  GPIO_INPUT)
+GPIO(MASTER_I2C_SCL,         B, 10, GPIO_INPUT)
+GPIO(MASTER_I2C_SDA,         B, 11, GPIO_INPUT)
 #endif
 
-GPIO(USB_DM,                 A, 11, GPIO_ANALOG,   NULL)
-GPIO(USB_DP,                 A, 12, GPIO_ANALOG,   NULL)
+GPIO(USB_DM,                 A, 11, GPIO_ANALOG)
+GPIO(USB_DP,                 A, 12, GPIO_ANALOG)
 
 /* Unimplemented signals which we need to emulate for now */
 UNIMPLEMENTED(ENTERING_RW)
