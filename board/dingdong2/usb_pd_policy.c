@@ -176,8 +176,8 @@ DECLARE_DEFERRED(gpio_hpd_irq_deferred);
 static int dp_drive_hpd_out(uint32_t *payload)
 {
 	int cur_lvl;
-	int lvl = PD_VDO_HPD_LVL(payload[0]);
-	int irq = PD_VDO_HPD_IRQ(payload[0]);
+	int lvl = PD_VDO_DPSTS_HPD_LVL(payload[0]);
+	int irq = PD_VDO_DPSTS_HPD_IRQ(payload[0]);
 	cur_lvl = gpio_get_level(GPIO_DP_HPD);
 	if (irq & cur_lvl) {
 		CPRINTF("DP_STS: HPD_IRQ\n");
