@@ -30,11 +30,13 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-#define USBD_VID                     0x0483
-#define USBD_PID                     0xDF11
+//#define USBD_VID                     0x0483
+//#define USBD_PID                     0xDF11
+
+
 
 #define USBD_LANGID_STRING            0x409
-#define USBD_MANUFACTURER_STRING      "STMicroelectronics"
+#define USBD_MANUFACTURER_STRING      "Bizlink"
 
 #define USBD_PRODUCT_FS_STRING        "DFU in FS Mode"
 

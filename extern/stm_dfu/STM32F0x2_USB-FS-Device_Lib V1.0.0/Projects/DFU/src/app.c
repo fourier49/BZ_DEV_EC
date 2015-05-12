@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include "usbd_dfu_core.h"
 #include "usbd_usr.h"
+#include "usbd_desc.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -121,7 +122,7 @@ int main(void)
   ///////////////////////////////////////////////////
   /* USART configuration */
   USART1_Config();
-  printf("dfu boot start... %s %s\n\r", __DATE__, __TIME__);
+  printf("dfu boot start... %s %s vid:0x%x pid:0x%x\n\r", __DATE__, __TIME__ , USBD_VID , USBD_PID);
   ///////////////////////////////////////////////////
 	
     /* Configure "DFU enter" button */
