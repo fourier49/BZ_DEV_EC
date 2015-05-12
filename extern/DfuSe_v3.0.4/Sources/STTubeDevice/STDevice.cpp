@@ -19,6 +19,8 @@ void print2file(char * c,...)
 	OutputDebugString(s);
 }
 
+IMPLEMENT_DYNAMIC(CSTDevice, CObject)
+
 CSTDevice::CSTDevice(CString SymbolicName)
 {
 	m_SymbolicName=SymbolicName;

@@ -48,7 +48,8 @@ static char THIS_FILE[] = __FILE__;
 #define COLOR_ERROR_FG		(RGB(0xFF,0x00,0x00))
 #define COLOR_ERROR_BG		(RGB_BK)
 
-static GUID	GUID_DFU = { 0x3fe809ab, 0xfb91, 0x4cb5, { 0xa6, 0x43, 0x69, 0x67, 0x0d, 0x52,0x36,0x6e } };
+//static GUID	GUID_DFU = { 0x3fe809ab, 0xfb91, 0x4cb5, { 0xa6, 0x43, 0x69, 0x67, 0x0d, 0x52,0x36,0x6e } };
+static GUID	GUID_DFU = { 0x58D07210, 0x27C1, 0x11DD, { 0xBD, 0x0B, 0x08, 0x00, 0x20, 0x0C, 0x9A, 0x66 } };
 static GUID GUID_APP = { 0xcb979912, 0x5029, 0x420a, { 0xae, 0xb1, 0x34, 0xfc, 0x0a, 0x7d,0x57,0x26 } };
 
 /////////////////////////////////////////////////////////////////////////////
@@ -534,6 +535,13 @@ void CDfuSeDemoDlg::OnSelchangeCombodevices()
 		
 			if (STDFU_Open((LPSTR)(LPCSTR)m_CurrDFUName,&hDle)==STDFU_NOERROR)
 			{
+				DFUSTATUS DFUStatus1;
+				for (int k = 0; k < 5; k++)
+				{
+					Sleep(10);
+					STDFU_Getstatus(&hDle, &DFUStatus1);
+				}
+
 				if (STDFU_GetDeviceDescriptor(&hDle, &m_DeviceDesc)==STDFU_NOERROR)
 				{
 					UINT Dummy1, Dummy2;
@@ -750,7 +758,7 @@ void CDfuSeDemoDlg::OnSelchangeCombodevices()
 				BYTE WRP11  = 0x00;
 				DWORD WPR  = 0x00;
 
-				DFUSTATUS DFUStatus1;
+				//DFUSTATUS DFUStatus1;
 				for (int k = 0; k < 5; k++)
 				{
 					Sleep(10);

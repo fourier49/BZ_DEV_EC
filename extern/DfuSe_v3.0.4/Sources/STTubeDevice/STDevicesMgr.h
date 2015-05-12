@@ -91,6 +91,7 @@ public:
 				PBYTE pBuffer, 
 				PUINT pSize, 
 				DWORD nTimeOut);
+	DWORD IsBIZLINKDevice(HANDLE hDevice, PBYTE pResult);
 
 private:
 	CObArray m_OpenDevices;

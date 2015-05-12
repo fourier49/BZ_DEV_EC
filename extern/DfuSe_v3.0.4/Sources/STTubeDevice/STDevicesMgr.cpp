@@ -4,6 +4,11 @@
 #include "STTubeDeviceTyp30.h"
 #include "STDevice.h"
 #include "STDevicesMgr.h"
+#include "BizlinkUSBDevice.h"
+
+//Bizlink
+#define DEVICE_ID "VID_06C4&PID_5010"
+
 
 CSTDevicesManager::CSTDevicesManager()
 {
@@ -27,18 +32,81 @@ CSTDevicesManager::~CSTDevicesManager()
 	}
 }
 
+
+DWORD CSTDevicesManager::IsBIZLINKDevice(HANDLE hDevice, PBYTE pResult)
+{
+	DWORD nRet = STDEVICE_MEMORY;
+	CObject* pObj = (CObject *)hDevice;
+
+	CRuntimeClass* prt = RUNTIME_CLASS(CBIZLinkDevice);
+
+	if (hDevice == NULL)
+	{
+		*pResult = 0;
+		return STDEVICE_BADPARAMETER;
+	}
+
+	if (m_OpenDevices.GetCount() == 0)
+	{
+		*pResult = 0;
+		return STDEVICE_BADPARAMETER;
+	}
+
+	if (pObj->IsKindOf(prt))
+	{
+		*pResult = 1;
+	}
+	else
+	{
+		*pResult = 0;
+	}
+	
+	return nRet;
+}
+
 DWORD CSTDevicesManager::Open(CString sSymbName, 
 								LPHANDLE phDevice, 
 								LPHANDLE phUnPlugEvent)
 {
 	CSTDevice *pDevice=NULL;
+	CBIZLinkDevice *pBizDevice = NULL;
 	DWORD nRet=STDEVICE_MEMORY;
 
 	if (!phDevice)
 		return STDEVICE_BADPARAMETER;
 
 	// Tries to create an object
+	if ((sSymbName.Find(DEVICE_ID) > 0))
+	{
+		if (m_OpenDevices.GetCount() == 0)
+		{
+			pBizDevice = new CBIZLinkDevice(sSymbName);
+
+			if (!pBizDevice)
+				return STDEVICE_BADPARAMETER;
+
+			// Tries to open the device
+			nRet = pBizDevice->Open(phUnPlugEvent);
+			if (nRet != STDEVICE_NOERROR)
+			{
+				delete pBizDevice;
+				pBizDevice = NULL;
+				return nRet;
+			}
+
+			// OK our Bizlink device object was successfully created. Let's add it to our collection
+			m_OpenDevices.Add(pBizDevice);
+			*phDevice = (HANDLE)pBizDevice;
+		}else
+		{
+			*phDevice = (HANDLE)m_OpenDevices[0];
+		}
+		
+	}
+	else
+	{
 	pDevice=new CSTDevice(sSymbName);
+
 	if (!pDevice)
 		return STDEVICE_BADPARAMETER;
 
@@ -55,24 +123,39 @@ DWORD CSTDevicesManager::Open(CString sSymbName,
 	m_OpenDevices.Add(pDevice);
 
 	*phDevice=(HANDLE)pDevice;
+	}
+
 	return STDEVICE_NOERROR;
 }
 
 DWORD CSTDevicesManager::Close(HANDLE hDevice)
 {
+	
 	DWORD nRet=STDEVICE_NOERROR;
 	int i;
+	CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+	CSTDevice * pDevice = (CSTDevice *)hDevice;
+	BYTE isBizlink = 0;
+	
+
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
-
-			// Do our best to destroy the object if possible
+			if (isBizlink)
+			{
+				pBizDevice->Close();
+				delete pBizDevice;
+				pBizDevice = NULL;
+			}
+			else
+			{
 			pDevice->Close();
 			delete pDevice;
 			pDevice=NULL;
+			}
 
 			m_OpenDevices.RemoveAt(i);
 			nRet=STDEVICE_NOERROR;
@@ -88,13 +171,24 @@ DWORD CSTDevicesManager::OpenPipes(HANDLE hDevice)
 	DWORD nRet=STDEVICE_NOERROR;
 	int i;
 
+
+	BYTE isBizlink = 0;
+
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->OpenPipes();
+			}
+			else{
 			CSTDevice *pDevice=(CSTDevice *)hDevice;
-
 			nRet=pDevice->OpenPipes();
+			}
 			break;
 		}
 	}
@@ -107,13 +201,26 @@ DWORD CSTDevicesManager::ClosePipes(HANDLE hDevice)
 	DWORD nRet=STDEVICE_NOERROR;
 	int i;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->ClosePipes();
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->ClosePipes();
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->ClosePipes();
+			}
 			break;
 		}
 	}
@@ -128,13 +235,26 @@ DWORD CSTDevicesManager::GetStringDescriptor( HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetStringDescriptor(nIndex, sString);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetStringDescriptor(nIndex, sString);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetStringDescriptor(nIndex, sString);
+			}
 			break;
 		}
 	}
@@ -148,13 +268,26 @@ DWORD CSTDevicesManager::GetDeviceDescriptor( HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetDeviceDescriptor(pDesc);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetDeviceDescriptor(pDesc);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetDeviceDescriptor(pDesc);
+			}
 			break;
 		}
 	}
@@ -166,14 +299,26 @@ DWORD CSTDevicesManager::GetNbOfConfigurations(HANDLE hDevice, PUINT pNbOfConfig
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetNbOfConfigurations(pNbOfConfigs);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetNbOfConfigurations(pNbOfConfigs);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetNbOfConfigurations(pNbOfConfigs);
+			}
 			break;
 		}
 	}
@@ -187,14 +332,25 @@ DWORD CSTDevicesManager::GetConfigurationDescriptor( HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetConfigurationDescriptor(nConfigIdx, pDesc);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetConfigurationDescriptor(nConfigIdx, pDesc);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetConfigurationDescriptor(nConfigIdx, pDesc);
+			}
 			break;
 		}
 	}
@@ -208,14 +364,25 @@ DWORD CSTDevicesManager::GetNbOfInterfaces(HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetNbOfInterfaces(nConfigIdx, pNbOfInterfaces);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetNbOfInterfaces(nConfigIdx, pNbOfInterfaces);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetNbOfInterfaces(nConfigIdx, pNbOfInterfaces);
+			}
 			break;
 		}
 	}
@@ -231,13 +398,26 @@ DWORD CSTDevicesManager::GetNbOfAlternates(HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetNbOfAlternates(nConfigIdx, nInterfaceIdx, pNbOfAltSets);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetNbOfAlternates(nConfigIdx, nInterfaceIdx, pNbOfAltSets);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetNbOfAlternates(nConfigIdx, nInterfaceIdx, pNbOfAltSets);
+			}
 			break;
 		}
 	}
@@ -254,13 +434,25 @@ DWORD CSTDevicesManager::GetInterfaceDescriptor( HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetInterfaceDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, pDesc);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetInterfaceDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, pDesc);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetInterfaceDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, pDesc);
+			}
 			break;
 		}
 	}
@@ -276,14 +468,26 @@ DWORD CSTDevicesManager::GetNbOfEndPoints( HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetNbOfEndPoints(nConfigIdx, nInterfaceIdx, nAltSetIdx, pNbOfEndPoints);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetNbOfEndPoints(nConfigIdx, nInterfaceIdx, nAltSetIdx, pNbOfEndPoints);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetNbOfEndPoints(nConfigIdx, nInterfaceIdx, nAltSetIdx, pNbOfEndPoints);
+			}
 			break;
 		}
 	}
@@ -301,13 +505,26 @@ DWORD CSTDevicesManager::GetEndPointDescriptor( HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->GetEndPointDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pDesc);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetEndPointDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pDesc);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->GetEndPointDescriptor(nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pDesc);
+			}
 			break;
 		}
 	}
@@ -327,13 +544,27 @@ DWORD CSTDevicesManager::GetNbOfDescriptors(HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
-			nRet=pDevice->GetNbOfDescriptors(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pNbOfDescriptors);
+			//nRet=pDevice->GetNbOfDescriptors(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pNbOfDescriptors);
+			
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetNbOfDescriptors(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pNbOfDescriptors);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
+				nRet = pDevice->GetNbOfDescriptors(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, pNbOfDescriptors);
+			}
+
 			break;
 		}
 	}
@@ -354,14 +585,28 @@ DWORD CSTDevicesManager::GetDescriptor(HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
-			nRet=pDevice->GetDescriptor(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, nIdx, pDesc, nDescSize);
+			//nRet=pDevice->GetDescriptor(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, nIdx, pDesc, nDescSize);
+			
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetDescriptor(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, nIdx, pDesc, nDescSize);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
+				nRet = pDevice->GetDescriptor(nLevel, nType, nConfigIdx, nInterfaceIdx, nAltSetIdx, nEndPointIdx, nIdx, pDesc, nDescSize);
+			}
+
 			break;
 		}
 	}
@@ -378,13 +623,26 @@ DWORD CSTDevicesManager::SelectCurrentConfiguration( HANDLE hDevice,
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->SelectCurrentConfiguration(nConfigIdx, nInterfaceIdx, nAltSetIdx);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->SelectCurrentConfiguration(nConfigIdx, nInterfaceIdx, nAltSetIdx);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->SelectCurrentConfiguration(nConfigIdx, nInterfaceIdx, nAltSetIdx);
+			}
 			break;
 		}
 	}
@@ -397,13 +655,26 @@ DWORD CSTDevicesManager::SetDefaultTimeOut(HANDLE hDevice, DWORD nTimeOut)
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
 
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->SetDefaultTimeOut(nTimeOut);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->SetDefaultTimeOut(nTimeOut);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->SetDefaultTimeOut(nTimeOut);
+			}
 			break;
 		}
 	}
@@ -415,14 +686,28 @@ DWORD CSTDevicesManager::SetMaxNumInterruptInputBuffer(HANDLE hDevice, WORD nMax
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
+
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
-			nRet=pDevice->SetMaxNumInterruptInputBuffer(nMaxNumInputBuffer);
+			//nRet=pDevice->SetMaxNumInterruptInputBuffer(nMaxNumInputBuffer);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->SetMaxNumInterruptInputBuffer(nMaxNumInputBuffer);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
+				nRet = pDevice->SetMaxNumInterruptInputBuffer(nMaxNumInputBuffer);
+			}
+
 			break;
 		}
 	}
@@ -434,14 +719,27 @@ DWORD CSTDevicesManager::GetMaxNumInterruptInputBuffer(HANDLE hDevice, PWORD pMa
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
-			nRet=pDevice->GetMaxNumInterruptInputBuffer(pMaxNumInputBuffer);
+			//nRet=pDevice->GetMaxNumInterruptInputBuffer(pMaxNumInputBuffer);
+			
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->GetMaxNumInterruptInputBuffer(pMaxNumInputBuffer);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
+				nRet = pDevice->GetMaxNumInterruptInputBuffer(pMaxNumInputBuffer);
+			}
+
 			break;
 		}
 	}
@@ -453,14 +751,26 @@ DWORD CSTDevicesManager::SetSuspendModeBehaviour(HANDLE hDevice, BOOL Allow)
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->SetSuspendModeBehaviour(Allow);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->SetSuspendModeBehaviour(Allow);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->SetSuspendModeBehaviour(Allow);
+			}
 			break;
 		}
 	}
@@ -474,14 +784,27 @@ DWORD CSTDevicesManager::EndPointControl( HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
-			nRet=pDevice->EndPointControl(nEndPointIdx, nOperation);
+			//nRet=pDevice->EndPointControl(nEndPointIdx, nOperation);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->EndPointControl(nEndPointIdx, nOperation);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
+				nRet = pDevice->EndPointControl(nEndPointIdx, nOperation);
+			}
+
 			break;
 		}
 	}
@@ -493,14 +816,25 @@ DWORD CSTDevicesManager::Reset(HANDLE hDevice)
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->Reset();
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->Reset();
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->Reset();
+			}
 			break;
 		}
 	}
@@ -512,14 +846,25 @@ DWORD CSTDevicesManager::ControlPipeRequest(HANDLE hDevice, PCNTRPIPE_RQ pReques
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->ControlPipeRequest(pRequest, pData);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->ControlPipeRequest(pRequest, pData);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->ControlPipeRequest(pRequest, pData);
+			}
 			break;
 		}
 	}
@@ -535,14 +880,25 @@ DWORD CSTDevicesManager::Read(  HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->Read(nEndPointIdx, pBuffer, pSize, nTimeOut);
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->Read(nEndPointIdx, pBuffer, pSize, nTimeOut);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->Read(nEndPointIdx, pBuffer, pSize, nTimeOut);
+			}
 			break;
 		}
 	}
@@ -558,14 +914,26 @@ DWORD CSTDevicesManager::Write(HANDLE hDevice,
 {
 	int i;
 	DWORD nRet=STDEVICE_BADPARAMETER;
+	BYTE isBizlink = 0;
+	IsBIZLINKDevice(hDevice, &isBizlink);
 
 	for (i=0;i<m_OpenDevices.GetSize();i++)
 	{
 		if (hDevice==(HANDLE)m_OpenDevices[i])
 		{
-			CSTDevice *pDevice=(CSTDevice *)hDevice;
+			//CSTDevice *pDevice=(CSTDevice *)hDevice;
 
+			//nRet=pDevice->Write(nEndPointIdx, pBuffer, pSize, nTimeOut);
+
+			if (isBizlink)
+			{
+				CBIZLinkDevice * pBizDevice = (CBIZLinkDevice *)hDevice;
+				nRet = pBizDevice->Write(nEndPointIdx, pBuffer, pSize, nTimeOut);
+			}
+			else{
+			CSTDevice *pDevice=(CSTDevice *)hDevice;
 			nRet=pDevice->Write(nEndPointIdx, pBuffer, pSize, nTimeOut);
+			}
 			break;
 		}
 	}
