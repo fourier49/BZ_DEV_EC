@@ -561,7 +561,6 @@ static int dp_status(int port, uint32_t *payload)
 	return 2;
 }
 
-extern void hpd_irq_deferred(void);
 extern void hpd_lvl_deferred(void);
 static void dp_switch_4L_2L(void)
 {
@@ -574,9 +573,6 @@ static void dp_switch_4L_2L(void)
 
 	usleep(300);
 	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
-
-	usleep(300);
-	hpd_irq_deferred();
 
 	usleep(300);
 	hpd_lvl_deferred();

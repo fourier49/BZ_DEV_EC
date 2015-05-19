@@ -111,7 +111,7 @@ const uint32_t vdo_ama = VDO_AMA(CONFIG_USB_PD_IDENTITY_HW_VERS,
 				 CONFIG_USB_PD_IDENTITY_SW_VERS,
 				 0, 0, 0, 0, /* SS[TR][12] */
 				 0, /* Vconn power */
-				 0, /* Vconn power required */
+				 1, /* Vconn power required */
 				 1, /* Vbus power required */
 				 AMA_USBSS_BBONLY /* USB SS support */);
 
