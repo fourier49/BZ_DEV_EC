@@ -157,7 +157,7 @@ test_mockable int main(void)
 	 * Check the RW firmware signature
 	 * and eventually jump to it if it is good.
 	 */
-	check_rw_signature();
+	// BizLink temp: check_rw_signature();
 #endif
 
 	/* Initialize the hook library.  This calls HOOK_INIT hooks. */
