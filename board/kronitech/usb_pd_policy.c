@@ -204,9 +204,15 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 
 void pd_check_dr_role(int port, int dr_role, int flags)
 {
+#ifdef CONFIG_BIZ_EMU_HOST
 	/* If UFP, try to switch to DFP */
 	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
 		pd_request_data_swap(port);
+#else
+	/* If DFP, try to switch to UFP */
+	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_DFP)
+		pd_request_data_swap(port);
+#endif
 }
 
 /* ----------------- Vendor Defined Messages ------------------ */

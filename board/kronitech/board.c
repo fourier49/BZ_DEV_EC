@@ -338,6 +338,17 @@ static void board_init_spi2(void)
 #endif /* CONFIG_SPI_FLASH */
 
 
+#ifdef CONFIG_BIZ_EMU_HOST
+void pd_task_dummy(void)
+{
+	int port = TASK_ID_TO_PORT(task_get_current());
+	if (port == 0) {
+		while (1) task_wait_event(5000*MSEC);
+	}
+}
+#endif
+
+extern enum pd_dual_role_states drp_state;
 /* Initialize board. */
 static void board_init(void)
 {
@@ -363,7 +374,11 @@ static void board_init(void)
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
 
-#ifndef CONFIG_BIZ_EMU_HOST
+#ifdef CONFIG_BIZ_EMU_HOST
+	drp_state = PD_DRP_FORCE_SOURCE;
+#else
+	drp_state = PD_DRP_TOGGLE_ON;
+
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
 #endif

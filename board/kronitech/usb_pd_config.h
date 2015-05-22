@@ -204,8 +204,10 @@ static inline void pd_tx_init(void)
 
 static inline void pd_set_host_mode(int port, int enable)
 {
+#ifndef CONFIG_BIZ_EMU_HOST
 	if (port == 0) {
 		if (enable) {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 1);
 			/* We never charging in power source mode */
 //			gpio_set_level(GPIO_USB_P0_CHARGE_EN_L, 1);
 
@@ -213,6 +215,7 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 1);
 //			gpio_set_level(GPIO_USB_P0_CC2_ODL, 1);
 		} else {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 0);
 			/* Kill VBUS power supply */
 //			gpio_set_level(GPIO_USB_P0_5V_EN, 0);
 
@@ -222,9 +225,15 @@ static inline void pd_set_host_mode(int port, int enable)
 
 			/* Let charge_manager decide to enable the port */
 		}
-#ifdef CONFIG_BIZ_DUAL_CC
-	} else {
+	}
+#endif
+
+#ifdef CONFIG_BIZ_EMU_HOST
+	if (port == 1) {
 		if (enable) {
+			gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 1);
+			gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 1);
+
 			/* We never charging in power source mode */
 //			gpio_set_level(GPIO_USB_P1_CHARGE_EN_L, 1);
 
@@ -232,6 +241,9 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P1_CC1_ODL, 1);
 //			gpio_set_level(GPIO_USB_P1_CC2_ODL, 1);
 		} else {
+			gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 0);
+			gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 0);
+
 			/* Kill VBUS power supply */
 //			gpio_set_level(GPIO_USB_P1_5V_EN, 0);
 
@@ -240,8 +252,8 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P1_CC2_ODL, 0);
 			/* Let charge_manager decide to enable the port */
 		}
-#endif
 	}
+#endif
 }
 
 /**
@@ -307,6 +319,7 @@ static inline void pd_set_vconn(int port, int polarity, int enable)
 
 static inline int pd_snk_is_vbus_provided(int port)
 {
+#if 0
 #ifdef __BIZ_EMU_BUILD__
 	return 1;
 #else
@@ -318,6 +331,13 @@ static inline int pd_snk_is_vbus_provided(int port)
 	if (port == 0)
 		return gpio_get_level(GPIO_USB_P0_VBUS_WAKE);
 	*/
+	return 1;
+#endif
+#endif
+#else
+#ifdef CONFIG_BIZ_EMU_HOST
+	return 0;
+#else
 	return 1;
 #endif
 #endif
