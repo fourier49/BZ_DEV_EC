@@ -102,13 +102,8 @@ static inline void pd_set_pins_speed(int port)
 		STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000001; // 0x00000003;
 	}
 
-#ifdef __BIZ_SPICLK_USE_PB9__
-	/* 40 MHz pin speed on TIM17_CH1 (PB9) */
-	STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00040000; // 0x000C0000;
-#else
 	/* 40 MHz pin speed on TIM14_CH1 (PB1) */
 	STM32_GPIO_OSPEEDR(GPIO_B) |= 0x00000004; // 0x0000000C;
-#endif
 }
 
 /* Reset SPI peripheral used for TX */
