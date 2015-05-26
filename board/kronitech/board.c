@@ -21,6 +21,8 @@
 #include "timer.h"
 #include "util.h"
 
+#define POWER_SIGNALS_MONITOR_INTERVAL  (100*MSEC)
+
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
 
@@ -278,6 +280,34 @@ void pwr_in_event(enum gpio_signal signal)
 	// task_wake(TASK_ID_PD_P1);
 }
 
+#ifndef CONFIG_BIZ_EMU_HOST
+int pwr_dc_in_detection=0;
+static void pwr_signals_monitor(void)
+{
+	static int prev_lvl=-1, debounce;
+	int lvl = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
+
+	if (lvl != prev_lvl) {
+		debounce = 0;
+		prev_lvl = lvl;
+	}
+	else {
+		if (debounce < 2)  debounce++;
+		else
+		if (debounce == 2) {
+			debounce++;
+			pwr_dc_in_detection = lvl;
+			CPRINTF("DC-IN %d\n", lvl);
+			// task_wake(TASK_ID_PD_P0);
+		}
+	}
+
+	hook_call_deferred(pwr_signals_monitor, POWER_SIGNALS_MONITOR_INTERVAL);
+}
+
+DECLARE_DEFERRED(pwr_signals_monitor);
+#endif
+
 // must be after GPIO's signal definition
 #include "gpio_list.h"
 
@@ -381,6 +411,9 @@ static void board_init(void)
 
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
+
+	// ISR: pwr_in_event() doesn't work, thus polling it instead
+	hook_call_deferred(pwr_signals_monitor, POWER_SIGNALS_MONITOR_INTERVAL);
 #endif
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
