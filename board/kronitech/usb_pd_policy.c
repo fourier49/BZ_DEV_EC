@@ -188,6 +188,15 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 	 * If partner is dual-role power and dualrole toggling is on, consider
 	 * if a power swap is necessary.
 	 */
+#if 0 
+// TODO: we temporarily disable this checking for auto PR-SWAP
+//       instead, use console command for the moment. Will need to get it AUTO later...
+#ifdef CONFIG_BIZ_EMU_HOST
+#else
+	extern int pwr_dc_in_detection;
+
+	if (!pwr_dc_in_detection) return;
+
 	if ((flags & PD_FLAGS_PARTNER_DR_POWER) &&
 	    pd_get_dual_role() == PD_DRP_TOGGLE_ON) {
 		/*
@@ -200,6 +209,8 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 		     (partner_extpower && pr_role == PD_ROLE_SOURCE))
 			pd_request_power_swap(port);
 	}
+#endif
+#endif
 }
 
 void pd_check_dr_role(int port, int dr_role, int flags)
@@ -567,9 +578,9 @@ static int dp_status(int port, uint32_t *payload)
 	return 2;
 }
 
-extern void hpd_lvl_deferred(void);
 static void dp_switch_4L_2L(void)
 {
+	enum hpd_event ev;
 	// enable DP AUX
 	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
 
@@ -581,7 +592,8 @@ static void dp_switch_4L_2L(void)
 	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
 
 	usleep(300);
-	hpd_lvl_deferred();
+	ev = (gpio_get_level(GPIO_USB_P0_DP_HPD)) ? hpd_high : hpd_low;
+	pd_send_hpd(0, ev);
 }
 DECLARE_DEFERRED(dp_switch_4L_2L);
 

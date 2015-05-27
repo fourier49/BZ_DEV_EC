@@ -146,7 +146,7 @@ static void hpd_mque_launch_deferred(void)
 }
 DECLARE_DEFERRED(hpd_mque_launch_deferred);
 
-void hpd_lvl_deferred(void)
+static void hpd_lvl_deferred(void)
 {
 	enum hpd_event ev = (gpio_get_level(GPIO_USB_P0_DP_HPD)) ? hpd_high : hpd_low;
 	if (ev != hpd_reported_event) {
@@ -405,15 +405,17 @@ static void board_init(void)
 #endif
 
 #ifdef CONFIG_BIZ_EMU_HOST
-	drp_state = PD_DRP_FORCE_SOURCE;
+	drp_state = PD_DRP_TOGGLE_ON;
 #else
 	drp_state = PD_DRP_TOGGLE_ON;
 
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
-
+	gpio_enable_interrupt(GPIO_MCU_PWR_DC_IN_DET);
+#if 0
 	// ISR: pwr_in_event() doesn't work, thus polling it instead
 	hook_call_deferred(pwr_signals_monitor, POWER_SIGNALS_MONITOR_INTERVAL);
+#endif
 #endif
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);

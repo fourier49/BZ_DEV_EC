@@ -204,6 +204,7 @@ static inline void pd_tx_init(void)
 
 static inline void pd_set_host_mode(int port, int enable)
 {
+	ccprintf("hostMode %d %d\n", port, enable);
 #ifndef CONFIG_BIZ_EMU_HOST
 	if (port == 0) {
 		if (enable) {
@@ -217,7 +218,7 @@ static inline void pd_set_host_mode(int port, int enable)
 		} else {
 			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 0);
 			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P0_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 0);
@@ -245,7 +246,7 @@ static inline void pd_set_host_mode(int port, int enable)
 			gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 0);
 
 			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P1_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P1_CC1_ODL, 0);
@@ -335,11 +336,9 @@ static inline int pd_snk_is_vbus_provided(int port)
 #endif
 #endif
 #else
-#ifdef CONFIG_BIZ_EMU_HOST
-	return 0;
-#else
+	// Note we simply ignore the detection of VBUS presence here
+	// since we have no circuit in place for the current HW rev
 	return 1;
-#endif
 #endif
 }
 
