@@ -204,7 +204,6 @@ static inline void pd_tx_init(void)
 
 static inline void pd_set_host_mode(int port, int enable)
 {
-	ccprintf("hostMode %d %d\n", port, enable);
 #ifndef CONFIG_BIZ_EMU_HOST
 	if (port == 0) {
 		if (enable) {
@@ -338,6 +337,9 @@ static inline int pd_snk_is_vbus_provided(int port)
 #else
 	// Note we simply ignore the detection of VBUS presence here
 	// since we have no circuit in place for the current HW rev
+	enum pd_states state = pd_get_state(port);
+	if (state == PD_STATE_SNK_DISCONNECTED)
+		return 0;
 	return 1;
 #endif
 }

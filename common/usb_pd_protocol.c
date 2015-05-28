@@ -363,6 +363,11 @@ int pd_is_connected(int port)
 		pd[port].task_state != PD_STATE_SRC_ACCESSORY);
 }
 
+enum pd_states pd_get_state(int port)
+{
+	return pd[port].task_state;
+}
+
 static inline void set_state(int port, enum pd_states next_state)
 {
 	enum pd_states last_state = pd[port].task_state;

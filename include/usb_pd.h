@@ -663,6 +663,12 @@ enum pd_states {
 	/* Number of states. Not an actual state. */
 	PD_STATE_COUNT,
 };
+/**
+ * get PD TASK state-machine state
+ *
+ * @param port the port number
+ */
+enum pd_states pd_get_state(int port);
 
 #define PD_FLAGS_PING_ENABLED      (1 << 0) /* SRC_READY pings enabled */
 #define PD_FLAGS_PARTNER_DR_POWER  (1 << 1) /* port partner is dualrole power */
