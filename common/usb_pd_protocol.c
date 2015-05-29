@@ -368,6 +368,22 @@ enum pd_states pd_get_state(int port)
 	return pd[port].task_state;
 }
 
+int pd_get_flags(int port, int *pr_role)
+{
+	switch(pd[port].task_state) {
+	case PD_STATE_SNK_READY:
+		*pr_role = PD_ROLE_SINK;
+		break;
+	case PD_STATE_SRC_READY:
+		*pr_role = PD_ROLE_SOURCE;
+		break;
+	default:
+		*pr_role = -1;
+		break;
+	}
+	return pd[port].flags;
+}
+
 static inline void set_state(int port, enum pd_states next_state)
 {
 	enum pd_states last_state = pd[port].task_state;

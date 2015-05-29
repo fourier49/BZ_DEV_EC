@@ -669,6 +669,7 @@ enum pd_states {
  * @param port the port number
  */
 enum pd_states pd_get_state(int port);
+int pd_get_flags(int port, int *pr_role);
 
 #define PD_FLAGS_PING_ENABLED      (1 << 0) /* SRC_READY pings enabled */
 #define PD_FLAGS_PARTNER_DR_POWER  (1 << 1) /* port partner is dualrole power */
