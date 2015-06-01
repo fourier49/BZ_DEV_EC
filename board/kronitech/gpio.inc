@@ -42,7 +42,7 @@ GPIO(USB_P1_CC_TX_DATA,      B, 14, GPIO_OUT_LOW)
 GPIO(USB_P1_CC_TX_EN,        A, 7,  GPIO_OUT_LOW)
 
 /* USB CC1/CC2 Polarity (orientation) */
-GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW)
+GPIO(USB_P1_CC_POLARITY,     D, 8,  GPIO_OUT_LOW)   // was PA8
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -60,6 +60,7 @@ GPIO(USB_P0_PWROLE_SRC,      B, 10, GPIO_OUT_LOW)   /* active HIGH */
 GPIO(USB_P0_PWR_5V_EN,       A, 6,  GPIO_OUT_LOW)   /* active HIGH, PD Provider */
 GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_LOW)   /* active HIGH, PD Provider */
 GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)   /* active HIGH, PD Consumer */
+GPIO(USB_P0_PWR_DISCHARGE,   A, 8,  GPIO_OUT_LOW)   /* active HIGH */
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -68,9 +69,9 @@ GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)   /* active HIGH, PD Consumer 
 GPIO(MCU_DBG_TRIGGER,        C, 11, GPIO_OUT_LOW)
 
 #ifndef CONFIG_BIZ_EMU_HOST
-GPIO(MCU_CHIPS_RESET_EN,     B, 11, GPIO_OUT_HIGH)
-GPIO(MCU_PWR_STDBY_HUB,      A, 7,  GPIO_OUT_HIGH)
-GPIO(MCU_PWR_STDBY_LAN,      B, 6,  GPIO_OUT_HIGH)
+GPIO(MCU_CHIPS_RESET_EN,     B, 11, GPIO_OUT_LOW)
+GPIO(MCU_PWR_STDBY_HUB,      A, 7,  GPIO_OUT_LOW)
+GPIO(MCU_PWR_STDBY_LAN,      B, 6,  GPIO_OUT_LOW)
 GPIO(MCU_PWR_STDBY_DP,       B, 9,  GPIO_OUT_LOW)
 #endif
 

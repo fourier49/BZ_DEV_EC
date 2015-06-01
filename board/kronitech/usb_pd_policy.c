@@ -37,19 +37,23 @@
 #define INPUT_VOLTAGE_DEADBAND_MIN 9700
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_SUSPEND | PDO_FIXED_COMM_CAP)
-//#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
+#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
 
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-		PDO_FIXED(20000, 3000, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_20V] = PDO_FIXED(20000, 3000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
+BUILD_ASSERT(ARRAY_SIZE(pd_src_pdo) == PDO_IDX_COUNT);
 
 const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+/* current and previous selected PDO entry */
+static int volt_idx;
+static int last_volt_idx;
 
 int pd_is_valid_input_voltage(int mv)
 {
@@ -85,10 +89,129 @@ int pd_check_requested_voltage(uint32_t rdo)
 	return EC_SUCCESS;
 }
 
+void set_output_voltage(int vidx)
+{
+#ifndef CONFIG_BIZ_EMU_HOST
+	gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+	gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
+	gpio_set_level(GPIO_USB_P0_PWR_VBUS_EN, 0);
+
+	if (vidx == PDO_IDX_SRC_5V) {
+		gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+		CPRINTF("SRC 5V\n");
+	}
+	else
+	if (vidx == PDO_IDX_SRC_20V) {
+		gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 1);
+		CPRINTF("SRC 20V\n");
+	}
+#if 0
+	else
+	if (vidx == PDO_IDX_SNK_VBUS) {
+		extern int pwr_dc_in_detection;
+		CPRINTF("SNK VBUS %d\n", pwr_dc_in_detection);
+		if (!pwr_dc_in_detection)
+			gpio_set_level(GPIO_USB_P0_PWR_VBUS_EN, 1);
+		;
+	}
+#endif
+	else
+		CPRINTF("no PWR\n");
+#endif
+}
+
+void discharge_voltage(int target_vidx)
+{
+	// gpio_set_level(GPIO_USB_P0_PWR_DISCHARGE, 1);
+}
+
 void pd_transition_voltage(int idx)
 {
-	/* No-operation: we are always 5V */
+	last_volt_idx = volt_idx;
+	volt_idx = idx - 1;
+	CPRINTF("Xsit Vol: %d %d\n", last_volt_idx, volt_idx);
+	if (volt_idx < last_volt_idx) { /* down voltage transition */
+#if 0
+		/* Stop OCP monitoring */
+		adc_disable_watchdog();
+
+		discharge_volt_idx = volt_idx;
+		/* from 20V : do an intermediate step at 12V */
+		if (volt_idx == PDO_IDX_SRC_5V && last_volt_idx == PDO_IDX_SRC_20V)
+			volt_idx = PDO_IDX_12V;
+		discharge_voltage(voltages[volt_idx].ovp);
+#else
+		discharge_voltage(PDO_IDX_SRC_5V);
+		set_output_voltage(PDO_IDX_SRC_5V);
+#endif
+	} else if (volt_idx > last_volt_idx) { /* up voltage transition */
+#if 0
+		if (discharge_is_enabled()) {
+			/* Make sure discharging is disabled */
+			discharge_disable();
+			/* Enable over-current monitoring */
+			adc_enable_watchdog(ADC_CH_A_SENSE,
+					    MAX_CURRENT_FAST, 0);
+		}
+#else
+		set_output_voltage(PDO_IDX_SRC_20V);
+#endif
+	}
 }
+
+#ifndef CONFIG_BIZ_EMU_HOST
+void check_pr_role(int port, int local_pwr)
+{
+	int pr_role;
+	int flags = pd_get_flags(port, &pr_role);
+	int partner_extpower = flags & PD_FLAGS_PARTNER_EXTPOWER;
+
+	if (local_pwr) {
+		// with local power, but only up-charging to a unpowered Host
+		if (!partner_extpower && pr_role == PD_ROLE_SINK) {
+			CPRINTF("PRSW: SNK->SRC\n");
+			pd_request_power_swap(port);
+		}
+
+		if (pd_alt_mode(0, USB_SID_DISPLAYPORT)) {
+			// back to power, restore extern devices power
+			gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
+			gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  1);
+		}
+	}
+	else {
+		// w/o local power, but request power from the Host
+		if (pr_role == PD_ROLE_SOURCE) {
+			CPRINTF("PRSW: SRC->SNK\n");
+			pd_request_power_swap(port);
+		}
+
+		if (!pd_alt_mode(0, USB_SID_DISPLAYPORT)) {
+			// lost power, reset extern devices power
+			gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
+			gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
+		}
+	}
+}
+
+void pd_pwr_local_change(int pwr_in)
+{
+	CPRINTF("PWR DC %d\n", pwr_in);
+	if (pwr_in) {
+		gpio_set_level(GPIO_USB_P0_PWR_VBUS_EN, 0);
+	}
+	else {
+		if (gpio_get_level(GPIO_USB_P0_PWR_5V_EN)
+		||  gpio_get_level(GPIO_USB_P0_PWR_20V_EN)) {
+			// No DC, thus shutdown to source power
+			CPRINTF("SRC no-DC\n");
+			set_output_voltage(PDO_IDX_OFF);
+		}
+		gpio_set_level(GPIO_USB_P0_PWR_VBUS_EN, 1);
+	}
+	check_pr_role( 0, pwr_in );
+}
+#endif
 
 int pd_set_power_supply_ready(int port)
 {
@@ -571,18 +694,17 @@ static int dp_status(int port, uint32_t *payload)
 				   (hpd == 1),       /* HPD_HI|LOW */
 				   0,		     /* request exit DP */
 				   0,		     /* request exit USB */
-				   0,		     /* MF pref */
-				   gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
+				   1,		     /* MF pref */
+				   gpio_get_level(GPIO_PD_SBU_ENABLE),
 				   0,		     /* power low */
 				   0x2);
+	CPRINTS("DP_STS:%x", payload[1]);
 	return 2;
 }
 
 static void dp_switch_4L_2L(void)
 {
 	enum hpd_event ev;
-	// enable DP AUX
-	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
 
 	// send RESET pulse to external peripherals
 	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
@@ -607,20 +729,23 @@ static int dp_config(int port, uint32_t *payload)
 		return 1;
 	}
 
-	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
+	// enable DP AUX
+	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
 
 	// send RESET pulse to external peripherals
+	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
 	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
 	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
 
 	// DP 4 lanes / 2 lanes switch
-	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_C)
+	if (PD_VDO_MODE_DP_SRCP(payload[1]) & MODE_DP_PIN_C)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 1);  // 4 lanes
 	else
-	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_D)
+	if (PD_VDO_MODE_DP_SRCP(payload[1]) & MODE_DP_PIN_D)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
 
-	hook_call_deferred(dp_switch_4L_2L, 20 * MSEC);
+	CPRINTS("DP_CFG:%x", payload[1]);
+	hook_call_deferred(dp_switch_4L_2L, 2 * MSEC);
 	return 1;
 }
 

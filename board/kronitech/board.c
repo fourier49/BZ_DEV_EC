@@ -21,7 +21,8 @@
 #include "timer.h"
 #include "util.h"
 
-#define POWER_SIGNALS_MONITOR_INTERVAL  (100*MSEC)
+#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC)
+#define POWER_SIGNALS_DEBOUNCE2_INTERVAL (500*MSEC)
 
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
@@ -274,38 +275,33 @@ void vbus1_evt(enum gpio_signal signal)
 }
 #endif
 
-void pwr_in_event(enum gpio_signal signal)
-{
-	ccprintf("DC-IN %d, %d!\n", signal, gpio_get_level(signal));
-	// task_wake(TASK_ID_PD_P1);
-}
-
 #ifndef CONFIG_BIZ_EMU_HOST
 int pwr_dc_in_detection=0;
-static void pwr_signals_monitor(void)
+
+static void pwr_in_debounce(void)
 {
-	static int prev_lvl=-1, debounce;
 	int lvl = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
+	if (lvl != pwr_dc_in_detection)
+		return;
 
-	if (lvl != prev_lvl) {
-		debounce = 0;
-		prev_lvl = lvl;
-	}
-	else {
-		if (debounce < 2)  debounce++;
-		else
-		if (debounce == 2) {
-			debounce++;
-			pwr_dc_in_detection = lvl;
-			CPRINTF("DC-IN %d\n", lvl);
-			// task_wake(TASK_ID_PD_P0);
-		}
-	}
+	// whenever DC is in, we won't need Host's VBUS power
+	pd_pwr_local_change(pwr_dc_in_detection);
 
-	hook_call_deferred(pwr_signals_monitor, POWER_SIGNALS_MONITOR_INTERVAL);
+	// we may get false HPD signals, get it being stablized
+	hpd_reported_event = hpd_none;
+	hook_call_deferred(hpd_lvl_deferred, POWER_SIGNALS_DEBOUNCE2_INTERVAL);
+
+	// task_wake(TASK_ID_PD_P1);
 }
+DECLARE_DEFERRED(pwr_in_debounce);
 
-DECLARE_DEFERRED(pwr_signals_monitor);
+void pwr_in_event(enum gpio_signal signal)
+{
+	pwr_dc_in_detection = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
+	ccprintf("DC-IN %d!\n", pwr_dc_in_detection);
+
+	hook_call_deferred(pwr_in_debounce, POWER_SIGNALS_DEBOUNCE_INTERVAL);
+}
 #endif
 
 // must be after GPIO's signal definition
@@ -412,10 +408,7 @@ static void board_init(void)
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
 	gpio_enable_interrupt(GPIO_MCU_PWR_DC_IN_DET);
-#if 0
-	// ISR: pwr_in_event() doesn't work, thus polling it instead
-	hook_call_deferred(pwr_signals_monitor, POWER_SIGNALS_MONITOR_INTERVAL);
-#endif
+	pwr_in_event(GPIO_MCU_PWR_DC_IN_DET);
 #endif
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);

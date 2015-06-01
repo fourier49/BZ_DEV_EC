@@ -218,6 +218,7 @@ static inline void pd_set_host_mode(int port, int enable)
 			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 0);
 			/* Kill VBUS power supply */
 			gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 0);
@@ -246,6 +247,7 @@ static inline void pd_set_host_mode(int port, int enable)
 
 			/* Kill VBUS power supply */
 			gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P1_PWR_20V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P1_CC1_ODL, 0);
@@ -343,6 +345,19 @@ static inline int pd_snk_is_vbus_provided(int port)
 	return 1;
 #endif
 }
+
+/* Voltage indexes for the PDOs */
+enum volt_idx {
+	PDO_IDX_SRC_5V  = 0,
+	PDO_IDX_SRC_20V = 1,
+	PDO_IDX_COUNT,
+	PDO_IDX_SNK_VBUS,
+	PDO_IDX_OFF,
+};
+
+void set_output_voltage(int vidx);
+void discharge_voltage(int target_vidx);
+void pd_pwr_local_change(int pwr_in);
 
 /* start as a sink in case we have no other power supply/battery */
 #ifdef CONFIG_BIZ_EMU_HOST
