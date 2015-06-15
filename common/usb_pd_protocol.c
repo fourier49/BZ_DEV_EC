@@ -403,6 +403,10 @@ static inline void set_state(int port, enum pd_states next_state)
 	    (last_state == PD_STATE_SRC_DISCONNECTED &&
 	     next_state == PD_STATE_SNK_DISCONNECTED))
 		return;
+
+	if ((next_state == PD_STATE_SNK_DISCONNECTED && last_state == PD_STATE_SNK_DISCONNECTED_DEBOUNCE)
+	||  (next_state == PD_STATE_SNK_DISCONNECTED_DEBOUNCE && last_state == PD_STATE_SNK_DISCONNECTED))
+		return;
 #endif
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
