@@ -38,7 +38,7 @@
 #define USBD_LANGID_STRING            0x409
 #define USBD_MANUFACTURER_STRING      "Bizlink"
 
-#define USBD_PRODUCT_FS_STRING        "DFU in FS Mode"
+#define USBD_PRODUCT_FS_STRING        "BLDR"
 
 #define USBD_CONFIGURATION_FS_STRING  "DFU Config"
 #define USBD_INTERFACE_FS_STRING      "DFU Interface"

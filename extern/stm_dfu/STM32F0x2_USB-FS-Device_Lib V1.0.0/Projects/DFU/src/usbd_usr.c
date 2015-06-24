@@ -52,7 +52,10 @@ USBD_Usr_cb_TypeDef USR_cb =
   */
 void USBD_USR_Init(void)
 {   
-  
+   RCC_APB1PeriphClockCmd(RCC_APB1Periph_PWR, ENABLE);
+	 PWR_BackupAccessCmd(ENABLE);
+	 RCC_RTCCLKConfig(RCC_RTCCLKSource_LSI);
+	 RCC_RTCCLKCmd(ENABLE);
 }
 
 /**

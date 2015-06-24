@@ -36,7 +36,18 @@
 #define FLASH_START_ADD                  0x08000000
 
 #define FLASH_END_ADD                   0x08040000
-#define FLASH_IF_STRING    (uint8_t*) "@Internal Flash   /0x08000000/12*001Ka,116*001Kg"  
+//For bootloader , we allow first 64K is Readable(a). 
+//and following 64K isReadable, Erasable and Writeable.(g)
+/*
+a (0x41): Readable
+b (0x42): Erasable
+c (0x43): Readable and Erasable
+d (0x44): Writeable
+e (0x45): Readable and Writeable
+f (0x46): Erasable and Writeable
+g (0x47): Readable, Erasable and Writeable
+*/
+#define FLASH_IF_STRING    (uint8_t*) "@Internal Flash   /0x08000000/64*001Ka,64*001Kg"  
 
 /* Exported types ------------------------------------------------------------*/
 /* Exported macro ------------------------------------------------------------*/

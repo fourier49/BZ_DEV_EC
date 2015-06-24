@@ -78,6 +78,8 @@ extern const uint8_t* usbd_dfu_StringDesc[];
 uint8_t DeviceState;
 uint8_t DeviceStatus[6];
 uint32_t Manifest_State = Manifest_complete;
+	
+volatile  uint8_t leave_dfu = 0;
 /* Data Management variables */
 static uint32_t wBlockNum = 0, wlength = 0;
 static uint32_t Pointer = APP_DEFAULT_ADD;  /* Base Address to Erase, Program or Read */
@@ -788,7 +790,7 @@ void DFU_LeaveDFUMode(void *pdev)
     DeviceStatus[1] = 0;
     DeviceStatus[2] = 0;
     DeviceStatus[3] = 0;
-
+#if(0)
     /* Disconnect the USB device */
     DCD_DevDisconnect (pdev);
 
@@ -797,7 +799,9 @@ void DFU_LeaveDFUMode(void *pdev)
     
     /* Generate system reset to allow jumping to the user code */
     NVIC_SystemReset();
-   
+#else
+		leave_dfu = 1;
+#endif
     /* This instruction will not be reached (system reset) */
     return;
   }  

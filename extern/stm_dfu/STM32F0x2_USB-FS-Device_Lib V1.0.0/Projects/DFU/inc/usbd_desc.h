@@ -48,12 +48,14 @@
 #define         Device2_Identifier          (0x1FFFF7B0)
 #define         Device3_Identifier          (0x1FFFF7B4)
 
-//#define USBD_VID                     0x06C4
-//#define USBD_PID                     0x5010
 
+#if(1)
+#define USBD_VID                     0x06C4
+#define USBD_PID                     0xC302	//For DFU bootloader
+#else
 #define USBD_VID                     0x0483
 #define USBD_PID                     0xDF11
-
+#endif
 /* Exported macro ------------------------------------------------------------*/
 /* Exported variables --------------------------------------------------------*/
 extern  uint8_t USBD_StrDesc[USB_MAX_STR_DESC_SIZ];

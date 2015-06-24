@@ -14,7 +14,7 @@
         <TargetCommonOption>
           <Device>STM32F072RB</Device>
           <Vendor>STMicroelectronics</Vendor>
-          <PackID>Keil.STM32F0xx_DFP.1.2.0</PackID>
+          <PackID>Keil.STM32F0xx_DFP.1.4.0</PackID>
           <PackURL>http://www.keil.com/pack/</PackURL>
           <Cpu>IROM(0x08000000,0x20000) IRAM(0x20000000,0x4000) CPUTYPE("Cortex-M0") CLOCK(12000000) ELITTLE</Cpu>
           <FlashUtilSpec></FlashUtilSpec>
@@ -84,6 +84,8 @@
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
             <UserProg2Dos16Mode>0</UserProg2Dos16Mode>
+            <nStopA1X>0</nStopA1X>
+            <nStopA2X>0</nStopA2X>
           </AfterMake>
           <SelectedForBatchBuild>0</SelectedForBatchBuild>
           <SVCSIdString></SVCSIdString>
@@ -347,7 +349,7 @@
           </ArmAdsMisc>
           <Cads>
             <interw>1</interw>
-            <Optim>4</Optim>
+            <Optim>1</Optim>
             <oTime>0</oTime>
             <SplitLS>0</SplitLS>
             <OneElfS>1</OneElfS>
@@ -361,9 +363,11 @@
             <uSurpInc>0</uSurpInc>
             <uC99>0</uC99>
             <useXO>0</useXO>
+            <v6Lang>0</v6Lang>
+            <v6LangP>0</v6LangP>
             <VariousControls>
               <MiscControls></MiscControls>
-              <Define>USE_STM32072B_EVAL,USE_STDPERIPH_DRIVER,STM32F072</Define>
+              <Define>USE_STM32072B_EVAL,USE_STDPERIPH_DRIVER,STM32F072,USE_BIZLINK_VID_PID</Define>
               <Undefine></Undefine>
               <IncludePath>..\inc;..\..\..\Libraries\CMSIS\Device\ST\STM32F0xx\Include;..\..\..\Libraries\STM32F0xx_StdPeriph_Driver\inc;..\..\..\Libraries\STM32_USB_Device_Driver\inc;..\..\..\Libraries\STM32_USB_Device_Library\Core\inc;..\..\..\Libraries\STM32_USB_Device_Library\Class\dfu\inc;..\..\..\Utilities\STM32_EVAL;..\..\..\Utilities\STM32_EVAL\Common;..\..\..\Utilities\STM32_EVAL\STM32072B_EVAL;..\..\..\Libraries\CMSIS\Include</IncludePath>
             </VariousControls>
@@ -437,6 +441,26 @@
               <FileName>usbd_usr.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\src\usbd_usr.c</FilePath>
+            </File>
+            <File>
+              <FileName>system_mode.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\system_mode.c</FilePath>
+            </File>
+            <File>
+              <FileName>rwsig.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\rwsig.c</FilePath>
+            </File>
+            <File>
+              <FileName>rsa.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\rsa.c</FilePath>
+            </File>
+            <File>
+              <FileName>sha256.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\src\sha256.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -587,6 +611,11 @@
               <FileName>stm32f0xx_usart.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\Libraries\STM32F0xx_StdPeriph_Driver\src\stm32f0xx_usart.c</FilePath>
+            </File>
+            <File>
+              <FileName>stm32f0xx_rtc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\..\Libraries\STM32F0xx_StdPeriph_Driver\src\stm32f0xx_rtc.c</FilePath>
             </File>
           </Files>
         </Group>

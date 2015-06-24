@@ -35,6 +35,11 @@
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
+extern int check_enter_dfu(void);
+extern int check_rw_signature(void);
+extern int check_verify_signature(void);
+
+
 USB_CORE_HANDLE  USB_Device_dev ;
 pFunction Jump_To_Application;
 uint32_t JumpAddress;
@@ -45,7 +50,7 @@ uint32_t JumpAddress;
 	2 = enter dfu mode
 */
 extern volatile int get_status_req;
-
+extern volatile  uint8_t leave_dfu;
 /* Private function prototypes -----------------------------------------------*/
 #ifdef __GNUC__
   /* With GCC/RAISONANCE, small printf (option LD Linker->Libraries->Small printf
@@ -104,6 +109,59 @@ void USART1_Config(void)
 	USART_Cmd(USART1, ENABLE);
 }
 
+#ifdef SUPPORT_KRONITECH
+/**
+  * @brief  Due to usb dp/dm on the kronitech is connected to hub then pass to mcu.
+  *			We need to init the hub and power in advance.
+  * @param  None
+  * @retval None
+  */
+void Kronitech_HW_Init(void)
+{
+  GPIO_InitTypeDef  GPIO_InitStructure;
+
+  /* Enable the GPIO for USB3.0 HUB Standby */
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+
+  /* Output high for USB3.0 HUB Standby*/
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7;
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_OUT;
+  GPIO_InitStructure.GPIO_OType = GPIO_OType_OD;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_NOPULL;
+  GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
+  GPIO_Init(GPIOA, &GPIO_InitStructure);
+  GPIOA->ODR =  GPIO_Pin_7;
+}
+
+void Kronitech_HW_DeInit(void)
+{
+  GPIO_InitTypeDef  GPIO_InitStructure;
+ 
+  RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, ENABLE);
+  /* Config as input mode as default reset state*/
+  GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN;
+  GPIO_InitStructure.GPIO_PuPd = GPIO_PuPd_DOWN;
+  GPIO_InitStructure.GPIO_Pin = GPIO_Pin_7;
+  GPIO_Init(GPIOA, &GPIO_InitStructure);
+  //RCC_AHBPeriphClockCmd(RCC_AHBPeriph_GPIOA, DISABLE);
+
+}
+#endif
+
+void Jump_to_main_application()
+{
+	 if (((*(__IO uint32_t*)APP_DEFAULT_ADD) & 0x2FFE0000 ) == 0x20000000)
+    { /* Jump to user application */
+      
+		JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
+    Jump_To_Application = (pFunction) JumpAddress;
+		printf("\r\nJump to APP... %x\r\n", (unsigned int)Jump_To_Application);
+    /* Initialize user application's Stack Pointer */
+    __set_MSP(*(__IO uint32_t*) APP_DEFAULT_ADD);
+    Jump_To_Application();
+		}
+}
+
 /**
   * @brief  Program entry point
   * @param  None
@@ -111,25 +169,26 @@ void USART1_Config(void)
   */
 int main(void)
 {
+	int start_app = 1; //default will start application.
   /*!< At this stage the microcontroller clock setting is already configured, 
        this is done through SystemInit() function which is called from startup
        file (startup_stm32f072.s) before to branch to application main.
        To reconfigure the default setting of SystemInit() function, refer to
        system_stm32f0xx.c file
       */  
-	unsigned i = 0;
-	
+  
   ///////////////////////////////////////////////////
   /* USART configuration */
   USART1_Config();
-  printf("dfu boot start... %s %s vid:0x%x pid:0x%x\n\r", __DATE__, __TIME__ , USBD_VID , USBD_PID);
+  printf("boot start... %s %s vid:0x%x pid:0x%x\n\r", __DATE__, __TIME__ , USBD_VID , USBD_PID);
   ///////////////////////////////////////////////////
 	
+#if 0
     /* Configure "DFU enter" button */
   STM_EVAL_PBInit(BUTTON_SEL, Mode_GPIO);
   
   // original switch between dfu/app mode via reset/user button, removed
-#if 0
+
   /* Check if the TAMPER push-button on STM32-EVAL Board is pressed */
   if (STM_EVAL_PBGetState(BUTTON_SEL) == 0x00)
   { /* Test if user code is programmed starting from address 0x8003000 */
@@ -165,37 +224,41 @@ int main(void)
   }
 #endif
 
-  // fake delay loop of 1 sec
-  for (i=0; i<100; i++)
+  if (check_enter_dfu() == 0)
   {
-    // sleep 1ms
-	  USB_BSP_mDelay(10);
-	  printf(".");
+		if(check_verify_signature())
+		{
+				//verify signature before jump to application.
+				start_app = check_rw_signature();
+		}
+		//if start to application
+		if(start_app)
+		{
+			/*disable and clear usb interrupt*/
+			USBD_DeInit(&USB_Device_dev); 
+			USB_BSP_mDelay(100);
+			/* Jump to user application */
+			Jump_to_main_application();
+		}
   }
-
-	printf("\r\nDFU-Detect=%d\r\n", get_status_req);
-  // jump to user application	
-  if (get_status_req == 0)
-  {
-	/*disable and clear usb interrupt*/
-	printf("\r\nStop USB device and wait for 1 seconds\r\n");
-	USBD_DeInit(&USB_Device_dev); 
-	/* Jump to user application */
-	USB_BSP_mDelay(1000); // delay 1 sec
-    JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
-		printf("JumpAddress: %x\r\n", JumpAddress);
-    Jump_To_Application = (pFunction) JumpAddress;
-	printf("\r\nJump to APP... %x\r\n", Jump_To_Application);
-    /* Initialize user application's Stack Pointer */
-    __set_MSP(*(__IO uint32_t*) APP_DEFAULT_ADD);
-    Jump_To_Application();
-  }
+	
+	#ifdef SUPPORT_KRONITECH
+		//enable Hub
+		Kronitech_HW_Init();
+	#endif
 
   // stay at boot loader
-  printf("\r\nstay at boot loader\r\n");
+  printf("\r\nenter dfu mode\r\n");
   
-  while (1) {}
-
+  while (!leave_dfu)
+	{
+		 USB_BSP_mDelay(10);
+	}
+	
+  USBD_DeInit(&USB_Device_dev); 
+	USB_BSP_mDelay(100);
+	/* Jump to user application */
+	Jump_to_main_application();
 } 
 
 
