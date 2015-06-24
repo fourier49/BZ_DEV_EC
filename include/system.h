@@ -28,6 +28,8 @@
 #define RESET_FLAG_AP_OFF      (1 << 12)  /* Do not power on AP */
 #define RESET_FLAG_PRESERVED   (1 << 13)  /* Some reset flags preserved from
 					   * previous boot */
+#define RESET_FLAG_DFU   					(1 << 14)
+#define RESET_FLAG_SKIP_CHECK_SIGNATURE		(1 << 15)
 
 /* System images */
 enum system_image_copy_t {
@@ -206,6 +208,21 @@ const char *system_get_build_info(void);
  * sync.
  */
 #define SYSTEM_RESET_LEAVE_AP_OFF   (1 << 2)
+/*
+ * Reboot to enter dfu mode
+ *
+ */
+#define SYSTEM_RESET_ENTER_DFU   (1 << 3)
+/*
+ * Reboot and skip signature check in bootloader
+ *
+ */
+#define SYSTEM_SKIP_SIG_CHECK   (1 << 4)
+/*
+ * Reboot and do signature check in bootloader
+ *
+ */
+#define SYSTEM_DO_SIG_CHECK   	(1 << 5)
 
 /**
  * Reset the system.

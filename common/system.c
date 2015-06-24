@@ -869,6 +869,46 @@ DECLARE_CONSOLE_COMMAND(reboot, command_reboot,
 			"Reboot the EC",
 			NULL);
 
+static int command_biz_auxcmd(int argc, char **argv)
+{
+	int flags = 0;
+
+	if(argc < 2)
+	    return EC_ERROR_PARAM_COUNT;
+	
+	//DFU flag will be cleared automatically in bootloader.
+	if(!strcasecmp(argv[1],"dfu_on"))
+	{
+		ccprintf("dfu on!\n");	
+		flags |= (SYSTEM_RESET_ENTER_DFU|SYSTEM_RESET_HARD);
+		
+	}else if(!strcasecmp(argv[1],"dfu_off"))
+	{
+		flags |= SYSTEM_RESET_HARD;
+	}
+    //signature check will be clear automatically in bootloader.
+	if(!strcasecmp(argv[2],"scheck_on"))	//digital signature check
+	{
+		ccprintf("scheck on!\n");
+	    flags |= SYSTEM_DO_SIG_CHECK;	
+				
+	}else if(!strcasecmp(argv[2],"scheck_off"))
+	{
+		ccprintf("scheck off!\n");
+		flags |= SYSTEM_SKIP_SIG_CHECK;
+	}
+	
+	ccputs("go !\n");
+	cflush();
+	system_reset(flags);
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(bzcmd, command_biz_auxcmd,
+			"[dfu_on|dfu_off] [scheck_on|scheck_off] ",
+			"Bizlink help commands",
+			NULL);
+
+
 static int command_system_lock(int argc, char **argv)
 {
 	force_locked = 1;

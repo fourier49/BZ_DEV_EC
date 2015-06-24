@@ -230,6 +230,9 @@ void system_reset(int flags)
 	uint32_t console_en = bkpdata_read(BKPDATA_INDEX_SAVED_RESET_FLAGS) &
 			      CONSOLE_BIT_MASK;
 
+	uint32_t sigch_dis = bkpdata_read(BKPDATA_INDEX_SAVED_RESET_FLAGS) &
+			      RESET_FLAG_SKIP_CHECK_SIGNATURE;				  	      
+
 	/* Disable interrupts to avoid task swaps during reboot */
 	interrupt_disable();
 
@@ -243,6 +246,24 @@ void system_reset(int flags)
 	/* Remember that the software asked us to hard reboot */
 	if (flags & SYSTEM_RESET_HARD)
 		save_flags |= RESET_FLAG_HARD;
+
+	//For DFU function.
+	if (flags & SYSTEM_RESET_ENTER_DFU)
+	{
+		save_flags |= RESET_FLAG_DFU;
+	}	
+	
+	//For FW Sig check
+	save_flags |= sigch_dis;//restoare previous config
+	if(flags & SYSTEM_DO_SIG_CHECK)
+	{
+	   	save_flags &= ~RESET_FLAG_SKIP_CHECK_SIGNATURE; 
+	}	
+	if(flags & SYSTEM_SKIP_SIG_CHECK)
+	{
+	   	save_flags |= RESET_FLAG_SKIP_CHECK_SIGNATURE; 
+	}		
+	
 
 	bkpdata_write(BKPDATA_INDEX_SAVED_RESET_FLAGS, save_flags | console_en);
 
