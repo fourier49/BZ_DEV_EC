@@ -880,17 +880,17 @@ static int command_biz_auxcmd(int argc, char **argv)
 	if(!strcasecmp(argv[1],"dfu_on"))
 	{
 		ccprintf("dfu on!\n");	
-		flags |= (SYSTEM_RESET_ENTER_DFU|SYSTEM_RESET_HARD);
+		flags |= SYSTEM_RESET_ENTER_DFU;
 		
 	}else if(!strcasecmp(argv[1],"dfu_off"))
 	{
-		flags |= SYSTEM_RESET_HARD;
+		//flags &= ~SYSTEM_RESET_ENTER_DFU;
 	}
     //signature check will be clear automatically in bootloader.
 	if(!strcasecmp(argv[2],"scheck_on"))	//digital signature check
 	{
 		ccprintf("scheck on!\n");
-	    flags |= SYSTEM_DO_SIG_CHECK;	
+	    	flags |= SYSTEM_DO_SIG_CHECK;	
 				
 	}else if(!strcasecmp(argv[2],"scheck_off"))
 	{
