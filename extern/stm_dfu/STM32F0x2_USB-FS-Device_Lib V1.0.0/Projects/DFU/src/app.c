@@ -254,11 +254,11 @@ int main(void)
 	{
 		 USB_BSP_mDelay(10);
 	}
-	
+	printf("\r\nleave dfu mode\r\n");
   USBD_DeInit(&USB_Device_dev); 
 	USB_BSP_mDelay(100);
-	/* Jump to user application */
-	Jump_to_main_application();
+	/* reboot */
+	NVIC_SystemReset();
 } 
 
 
