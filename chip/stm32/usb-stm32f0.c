@@ -18,3 +18,9 @@ void usb_disconnect(void)
 	/* disable pull-up on DP to disconnect */
 	STM32_USB_BCDR &= ~(1 << 15) /* DPPU */;
 }
+
+int usb_isconnect(void)
+{
+	uint32_t val =  STM32_USB_BCDR;
+	return (( val & (1<<15) ) == 0)? 0 : 1;
+}

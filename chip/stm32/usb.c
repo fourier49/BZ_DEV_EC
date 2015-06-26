@@ -64,6 +64,25 @@ const struct usb_config_descriptor USB_CONF_DESC(conf) = {
 	.bMaxPower = 250, /* MaxPower 500 mA */
 };
 
+/* USB Standard Device Descriptor */
+static const struct usb_device_descriptor dev_desc_billboard = {
+	.bLength = USB_DT_DEVICE_SIZE,
+	.bDescriptorType = USB_DT_DEVICE,
+	.bcdUSB = USB_DEV_BCDUSB,
+	.bDeviceClass = USB_CLASS_BILLBOARD,//reset device class is billboard
+	.bDeviceSubClass = 0x00,
+	.bDeviceProtocol = 0x00,
+	.bMaxPacketSize0 = USB_MAX_PACKET_SIZE,
+	.idVendor = USB_VID_BIZLINK,
+	.idProduct = CONFIG_USB_PID,
+	.bcdDevice = CONFIG_USB_BCD_DEV,
+	.iManufacturer = USB_STR_VENDOR,
+	.iProduct = USB_STR_PRODUCT,
+	.iSerialNumber = 0,
+	.bNumConfigurations = 1
+};
+
+
 const uint8_t usb_string_desc[] = {
 	4, /* Descriptor size */
 	USB_DT_STRING,
@@ -84,6 +103,22 @@ static int set_addr;
 static int desc_left;
 /* pointer to descriptor data if any */
 static const uint8_t *desc_ptr;
+
+static int isBillboardOnly = 0;//defult should be 0,use usb console.
+
+/* if current usb device class is billboard. */
+int usb_is_billboard_only()
+{
+	return isBillboardOnly;
+}
+
+/* Get current usb device class. */
+int usb_set_billboard_device_only(int isBillboard)
+{
+	isBillboardOnly =  isBillboard;
+	return  isBillboardOnly;
+}
+
 
 void usb_read_setup_packet(usb_uint *buffer, struct usb_setup_packet *packet)
 {
@@ -120,12 +155,17 @@ static void ep0_rx(void)
 
 		switch (type) {
 		case USB_DT_DEVICE: /* Setup : Get device descriptor */
-			desc = (void *)&dev_desc;
-			len = sizeof(dev_desc);
+			if(isBillboardOnly) {
+			    desc = (void *)&dev_desc_billboard;
+				len = sizeof(dev_desc_billboard);
+			}else{
+			    desc = (void *)&dev_desc;
+				len = sizeof(dev_desc);
+			}
 			break;
 		case USB_DT_CONFIGURATION: /* Setup : Get configuration desc */
-			desc = __usb_desc;
-			len = USB_DESC_SIZE;
+				desc = __usb_desc;
+				len = USB_DESC_SIZE;	
 			break;
 #ifdef CONFIG_USB_BOS
 		case USB_DT_BOS: /* Setup : Get BOS descriptor */
@@ -158,9 +198,10 @@ static void ep0_rx(void)
 			len = USB_MAX_PACKET_SIZE;
 		}
 		memcpy_to_usbram(EP0_BUF_TX_SRAM_ADDR, desc, len);
-		if (type == USB_DT_CONFIGURATION)
-			/* set the real descriptor size */
-			ep0_buf_tx[1] = USB_DESC_SIZE;
+		if (type == USB_DT_CONFIGURATION) {
+				/* set the real descriptor size */
+				ep0_buf_tx[1] = USB_DESC_SIZE;
+		}
 		btable_ep[0].tx_count = len;
 		STM32_TOGGLE_EP(0, EP_TX_RX_MASK, EP_TX_RX_VALID,
 				desc_left ? 0 : EP_STATUS_OUT);

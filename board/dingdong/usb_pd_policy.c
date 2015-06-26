@@ -202,14 +202,15 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 		alt_mode[PD_AMODE_GOOGLE] = OPOS_GFU;
 		rv = 1;
 	}
-
+#ifndef CONFIG_USB_CONSOLE
+//Beccause we need to establish usb connection when console needed. 
 	if (rv)
 		/*
 		 * If we failed initial mode entry we'll have enumerated the USB
 		 * Billboard class.  If so we should disconnect.
 		 */
 		usb_disconnect();
-
+#endif
 	return rv;
 }
 

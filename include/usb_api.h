@@ -42,4 +42,13 @@ void usb_disconnect(void);
  */
 void usb_release(void);
 
+
+/* if current usb device class is billboard. */
+int usb_is_billboard_only(void);
+
+/* Get current usb device class. */
+int usb_set_billboard_device_only(int isBillboard);
+
+int usb_isconnect(void);
+
 #endif /* USB_API_H */

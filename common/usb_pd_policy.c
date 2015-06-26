@@ -748,7 +748,7 @@ int pd_vdm(int port, int cnt, uint32_t *payload, uint32_t **rpayload)
 }
 #endif /* !CONFIG_USB_PD_CUSTOM_VDM */
 
-void pd_usb_billboard_deferred(void)
+void pd_usb_enter_billboard_deferred(void)
 {
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP) \
 	&& !defined(CONFIG_USB_PD_SIMPLE_DFP) && defined(CONFIG_USB_BOS)
@@ -760,6 +760,44 @@ void pd_usb_billboard_deferred(void)
 	 */
 	if (!pd_alt_mode(0, USB_SID_DISPLAYPORT))
 		usb_connect();
+
+    CPRINTF("pd_usb_enter_billboard_deferred\n");
+#endif
+}
+DECLARE_DEFERRED(pd_usb_enter_billboard_deferred);
+
+void pd_usb_billboard_deferred(void)
+{
+#if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP) \
+	&& !defined(CONFIG_USB_PD_SIMPLE_DFP) && defined(CONFIG_USB_BOS)
+
+#if(0)
+	/*
+	 * TODO(tbroch)
+	 * 1. Will we have multiple type-C port UFPs
+	 * 2. Will there be other modes applicable to DFPs besides DP
+	 */
+	if (!pd_alt_mode(0, USB_SID_DISPLAYPORT))
+		usb_connect();
+#else
+    //if we need to re-enumerated as billboard device,disconnect usb first.
+	if (!pd_alt_mode(0, USB_SID_DISPLAYPORT))
+	{
+    	//CPRINTF("pd_usb_billboard_deferred , connected:%d \n", usb_isconnect());
+    	//Fixme : need to handle uplung event,to reset billboard flag in usb.c
+    	if(usb_isconnect() && (!usb_is_billboard_only())) 
+		{
+				usb_disconnect();
+	
+				usb_set_billboard_device_only(1);
+				
+				hook_call_deferred(
+					pd_usb_enter_billboard_deferred,
+				 	(300*MSEC));
+			
+		}
+	}
+#endif
 
 #endif
 }
