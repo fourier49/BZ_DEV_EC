@@ -4,7 +4,9 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-GPIO_INT(DP_HPD,            A, 0,  GPIO_INT_BOTH, hpd_event)
+
+GPIO_INT(DP_HPD,        A, 0,  GPIO_INT_BOTH, hpd_event)
+
 GPIO(USB_C_CC1_PD,      A, 1,  GPIO_ANALOG)
 GPIO(STM_READY,         A, 2,  GPIO_OUT_LOW)  /* factory test only */
 GPIO(PD_DAC_REF,        A, 4,  GPIO_ANALOG)

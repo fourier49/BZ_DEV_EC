@@ -95,11 +95,11 @@ void pd_execute_data_swap(int port, int data_role)
 	/* Do nothing */
 }
 
-void pd_check_pr_role(int port, int pr_role, int partner_pr_swap)
+void pd_check_pr_role(int port, int pr_role, int flags)
 {
 }
 
-void pd_check_dr_role(int port, int dr_role, int partner_dr_swap)
+void pd_check_dr_role(int port, int dr_role, int flags)
 {
 }
 /* ----------------- Vendor Defined Messages ------------------ */
@@ -115,7 +115,7 @@ const uint32_t vdo_ama = VDO_AMA(CONFIG_USB_PD_IDENTITY_HW_VERS,
 				 CONFIG_USB_PD_IDENTITY_SW_VERS,
 				 0, 0, 0, 0, /* SS[TR][12] */
 				 0, /* Vconn power */
-				 0, /* Vconn power required */
+				 1, /* Vconn power required */
 				 1, /* Vbus power required */
 				 AMA_USBSS_BBONLY /* USB SS support */);
 
@@ -306,15 +306,14 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 		alt_mode[PD_AMODE_GOOGLE] = OPOS_GFU;
 		rv = 1;
 	}
-#ifndef CONFIG_USB_CONSOLE
-//Beccause we need to establish usb connection when console needed. 
+
 	if (rv)
 		/*
 		 * If we failed initial mode entry we'll have enumerated the USB
 		 * Billboard class.  If so we should disconnect.
 		 */
 		usb_disconnect();
-#endif
+
 	return rv;
 }
 

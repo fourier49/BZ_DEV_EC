@@ -20,13 +20,21 @@
 #include "timer.h"
 #include "util.h"
 
+#define MAX_HPD_MSG_QUEUE   4
+#define HPD_MSG_QUEUE_GAP   (4*MSEC)
+
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
-static volatile int hpd_reported_level = -1;
+static volatile enum hpd_event hpd_reported_event = hpd_none;
 static volatile int hpd_event_triggering;   // HPD event is triggering and not resolved yet
 
 void hpd_event(enum gpio_signal signal);
 #include "gpio_list.h"
+
+#ifdef CONFIG_COMMON_RUNTIME
+#define CPRINTF(format, args...) cprintf(CC_USBPD, format, ## args)
+#define CPRINTS(format, args...) cprints(CC_USBPD, format, ## args)
+#endif
 
 /**
  * Hotplug detect deferred task
@@ -49,29 +57,99 @@ void hpd_event(enum gpio_signal signal);
  * x        0         1     n/a         >100ms    high
  * 0        1         0     <100ms      n/a       high glitch (ignore)
  * x        1         0     n/a         >100ms    low
+ *
+ *************************************************************************
+ * 3.15.2.1.1 HPD-to-PD Converter Message Queuing Rules
+ * <1> If an IRQ_HPD is detected while a previous IRQ_HPD is in the queue,
+ *     the converter shall transmit DisplayPort Status updates for both events.
+ * <2> If an IRQ_HPD is detected while a previous HPD_High is in the queue,
+ *     both shall be transmitted, either in one status update (recommended)
+ *     or separate messages in the order detected.
+ * <3> If HPD_Low is detected while any previous status updates are in the
+ *     queue (including IRQ_HPD), the previous status updates may be discarded.
+ * <4> If HPD_High is detected while a previous HPD_Low is in the queue,
+ *     both shall be transmitted in the order detected.
  */
+static volatile enum hpd_event hpd_msg_queue[MAX_HPD_MSG_QUEUE];
+static volatile int hpd_qhead, hpd_qtail;
 
-void hpd_irq_deferred(void)
+#define hpd_mque_depth()    ((hpd_qhead - hpd_qtail + MAX_HPD_MSG_QUEUE) % MAX_HPD_MSG_QUEUE)
+#define hpd_mque_reset()    hpd_qhead = hpd_qtail
+
+// n > 0: peek in forward direction, from tail
+// n < 0: peek in reverse direction, from head
+static enum hpd_event hpd_mque_peek(int n)
 {
-	hpd_reported_level = -1;
-	pd_send_hpd(0, hpd_irq);
+	int hpd_ptr;
+	if (hpd_mque_depth() == 0)
+		return hpd_none;
+
+	if (n > 0)
+		hpd_ptr = (hpd_qtail + n - 1 + MAX_HPD_MSG_QUEUE) % MAX_HPD_MSG_QUEUE;
+	else if (n < 0)
+		hpd_ptr = (hpd_qhead + n + 1 + MAX_HPD_MSG_QUEUE) % MAX_HPD_MSG_QUEUE;
+	else
+		hpd_ptr = hpd_qtail;
+
+	return hpd_msg_queue[hpd_ptr];
 }
-DECLARE_DEFERRED(hpd_irq_deferred);
 
-void hpd_lvl_deferred(void)
+static enum hpd_event hpd_mque_last(void)
 {
-	int level = gpio_get_level(GPIO_DP_HPD);
+	if (hpd_mque_depth() > 0)
+		return hpd_mque_peek(-1);
+	else
+		return hpd_reported_event;
+}
 
-	if (level == hpd_reported_level)
-		// due to glitch, the level may be reported already
-		return;
-	hpd_reported_level = level;
+static enum hpd_event hpd_mque_get(void)
+{
+	enum hpd_event ev = hpd_msg_queue[hpd_qtail];
+	if (hpd_qhead == hpd_qtail) {
+		/* QUEUE empty */
+		CPRINTF("HPD MQue.E\n");
+		return hpd_none;
+	}
+	hpd_qtail = (hpd_qtail + 1) % MAX_HPD_MSG_QUEUE;
+	return ev;
+}
 
-	if (level != hpd_prev_level)
-		/* It's a glitch while in deferred or canceled action */
-		return;
+static void hpd_mque_put(enum hpd_event ev)
+{
+	hpd_msg_queue[hpd_qhead] = ev;
+	hpd_qhead = (hpd_qhead + 1) % MAX_HPD_MSG_QUEUE;
+	if (hpd_qhead == hpd_qtail) {
+		/* QUEUE full */
+		CPRINTF("HPD MQue.F: %d\n", ev);
+		hpd_qtail = (hpd_qtail + 1) % MAX_HPD_MSG_QUEUE;
+	}
+}
 
-	pd_send_hpd(0, (level) ? hpd_high : hpd_low);
+static void hpd_mque_launch_deferred(void);
+static void hpd_mque_launch(enum hpd_event ev)
+{
+	int depth = hpd_mque_depth();
+	hpd_mque_put(ev);
+	if (depth == 0)
+		hook_call_deferred(hpd_mque_launch_deferred, 0);
+}
+
+static void hpd_mque_launch_deferred(void)
+{
+	hpd_reported_event = hpd_mque_get();
+	pd_send_hpd(0, hpd_reported_event);
+	if (hpd_mque_depth() > 0)
+		hook_call_deferred(hpd_mque_launch_deferred, HPD_MSG_QUEUE_GAP);
+}
+DECLARE_DEFERRED(hpd_mque_launch_deferred);
+
+static void hpd_lvl_deferred(void)
+{
+	enum hpd_event ev = (gpio_get_level(GPIO_DP_HPD)) ? hpd_high : hpd_low;
+	if (ev != hpd_reported_event) {
+		hpd_reported_event = ev;
+		pd_send_hpd(0, hpd_reported_event);
+	}
 }
 DECLARE_DEFERRED(hpd_lvl_deferred);
 
@@ -85,37 +163,107 @@ void hpd_event(enum gpio_signal signal)
 {
 	timestamp_t now = get_time();
 	int level = gpio_get_level(signal);
-	int prev_level = hpd_prev_level;
 	uint64_t cur_delta = now.val - hpd_prev_ts;
+	static unsigned glitch_count = 0;
 
 	/* store current time */
 	hpd_prev_ts = now.val;
-	hpd_prev_level = level;
 
 	/* All previous hpd level events need to be re-triggered */
 	hook_call_deferred(hpd_lvl_deferred, -1);
+
+	if (hpd_prev_level == level) {
+		CPRINTF("ERR:HPD_EVT lev=%d\n", level);
+		glitch_count++;
+		return;
+	}
+	hpd_prev_level = level;
 
 	// Type-C end must be DFP_D (or BOTH) for this HPD event message
 	if (!(tce_conn_status & DP_STS_CONN_DFPD))  // not DFP_D or BOTH
 		return;
 
-	/* It's a glitch.  Previous time moves but level is the same. */
-	if (cur_delta < HPD_DEBOUNCE_GLITCH) {
-		// this glitch may be the last edge but filtered
-		//    ------------+    +--+
-		//                |    |  |
-		//                +----+  +----------------------
-		//                     IRQ
-		//                        glitch ==> filtered, LOW is eaten
+	if (level) { // GLITCH: < 250us
+		// -------+  +-----++-
+		//        |  |     ||     HIGH, IRQ, HIGH, GLITCH
+		//        +--+     ++ 
+		// -------+  +--++-
+		//        |  |  ||        HIGH, IRQ, glitch, GLITCH
+		//        +--+  ++ 
+		// -------+  +-----+  +-
+		//        |  |     |  |   HIGH, IRQ, HIGH, IRQ
+		//        +--+     +--+ 
+		// -------+  +--+  +-
+		//        |  |  |  |      HIGH, IRQ, glitch, IRQ
+		//        +--+  +--+ 
+		// ---+      +--+  +-
+		//    |      |  |  |      HIGH, LOW, glitch, IRQ
+		//    +------+  +--+ 
+		//
+		// -------+      +-
+		//        |      |        HIGH, LOW
+		//        +------+ 
+		if (cur_delta <= HPD_DEBOUNCE_GLITCH) {
+			glitch_count++;
+			hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
+			return;
+		}
+		else
+		if (cur_delta <= HPD_DEBOUNCE_IRQ) {
+			// %SPEC%: <1> and <2>
+			// ensure previous status is HIGH
+			enum hpd_event pre_event = hpd_mque_last();
+			if (pre_event == hpd_low) {
+				CPRINTF("ERR:HPD_EVT GLITCHs-IRQ:%d\n", glitch_count);
+
+				// reset and inject HIGH into queue
+				hpd_mque_reset();
+				hpd_mque_put(hpd_high);
+			}
+			else
+			if (hpd_mque_depth() > 1) {
+				// only keep 1 event in queue
+				hpd_mque_reset();
+				hpd_mque_put(pre_event);
+			}
+
+			hpd_mque_launch(hpd_irq);
+			glitch_count = 0;
+			return;
+		}
+		else {
+			// We will honor it as a LEVEL-LOW, even it may be smaller than 100ms
+			// %SPEC%: <4>
+			hpd_mque_reset();
+			hpd_mque_launch( hpd_low );
+
+			hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
+			glitch_count = 0;
+			return;
+		}
+	}
+	else { // GLITCH: < 2ms
+		// ---+  +--+
+		//    |  |  |             HIGH, IRQ, GLITCH
+		//    +--+  +-
+		// ---+      +--+
+		//    |      |  |         HIGH, LOW, GLITCH
+		//    +------+  +-
+		// ---+      +------+
+		//    |      |      |     HIGH, LOW, HIGH
+		//    +------+      +-
+
+		if (cur_delta <= HPD_DEBOUNCE_IRQ)
+			glitch_count++;
+		else {
+			// We will honor it as a LEVEL-HIGH, even it may be smaller than 100ms
+			// %SPEC%: <4>
+			hpd_mque_launch( hpd_high );
+			glitch_count = 0;
+		}
 		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 		return;
 	}
-
-	if ((!prev_level && level) && (cur_delta <= HPD_DEBOUNCE_IRQ))
-		/* It's an irq */
-		hook_call_deferred(hpd_irq_deferred, 0);
-	else if (cur_delta > HPD_DEBOUNCE_IRQ)
-		hook_call_deferred(hpd_lvl_deferred, HPD_DEBOUNCE_LVL);
 
 	hpd_event_triggering = 1;
 	hook_call_deferred(hpd_event_trigger_clear, 300 * MSEC);
