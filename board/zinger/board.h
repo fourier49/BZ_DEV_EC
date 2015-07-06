@@ -66,6 +66,10 @@
 #define UARTN_BASE STM32_USART_BASE(CONFIG_UART_CONSOLE)
 
 /* USB configuration */
+#define CONFIG_USB_VENDOR_STR  "BizLink Technology Inc."
+#define CONFIG_USB_PRODUCT_STR "Zinger"
+#define CONFIG_USB_BB_URL      USB_BIZLINK_TYPEC_URL
+#define CONFIG_USB_VID         USB_VID_BIZLINK
 #if defined(BOARD_ZINGER)
 #define CONFIG_USB_PID 0x5012
 #define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
