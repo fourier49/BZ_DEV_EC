@@ -352,6 +352,24 @@ static inline int pd_snk_is_vbus_provided(int port)
 #endif
 }
 
+
+
+/* Voltage indexes for the PDOs */
+enum volt_idx {
+	PDO_IDX_SRC_5V  = 0,
+	PDO_IDX_SRC_20V = 1,
+	PDO_IDX_COUNT,
+	PDO_IDX_SNK_VBUS,
+	PDO_IDX_OFF,
+};
+
+void set_output_voltage(int vidx);
+void discharge_voltage(int target_vidx);
+void pd_pwr_local_change(int pwr_in);
+
+void pd_check_charger_deferred(void);
+
+
 /* start as a sink in case we have no other power supply/battery */
 #ifdef CONFIG_BIZ_EMU_HOST
 #define PD_DEFAULT_STATE PD_STATE_SRC_DISCONNECTED

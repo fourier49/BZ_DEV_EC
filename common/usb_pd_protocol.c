@@ -368,6 +368,20 @@ enum pd_states pd_get_state(int port)
 	return pd[port].task_state;
 }
 
+int pd_get_cc_state(int port)
+{
+	//return pd[port].cc_state;
+	int cc1_volt, cc2_volt;
+
+	cc1_volt = pd_adc_read(port, 0);
+	cc2_volt = pd_adc_read(port, 1);
+	if (CC_RD(cc1_volt) || CC_RD(cc2_volt))
+		return 1;
+
+	return 0;
+}
+
+
 int pd_get_flags(int port, int *pr_role)
 {
 	switch(pd[port].task_state) {

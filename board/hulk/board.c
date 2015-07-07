@@ -21,7 +21,8 @@
 #include "timer.h"
 #include "util.h"
 
-
+#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC)
+#define POWER_SIGNALS_DEBOUNCE2_INTERVAL (500*MSEC)
 
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
@@ -268,20 +269,44 @@ void vbus0_evt(enum gpio_signal signal)
 	task_wake(TASK_ID_PD_P0);
 }
 
-//#ifdef CONFIG_BIZ_DUAL_CC
-//#if defined(CONFIG_BIZ_DUAL_CC) && !defined(CONFIG_BIZ_HULK)
+#ifdef CONFIG_BIZ_DUAL_CC
 void vbus1_evt(enum gpio_signal signal)
 {
 	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
 	task_wake(TASK_ID_PD_P1);
 }
-//#endif
+#endif
+
+#ifndef CONFIG_BIZ_EMU_HOST
+#ifndef CONFIG_BIZ_HULK
+int pwr_dc_in_detection=0;
+
+static void pwr_in_debounce(void)
+{
+	int lvl = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
+	if (lvl != pwr_dc_in_detection)
+		return;
+
+	// whenever DC is in, we won't need Host's VBUS power
+	pd_pwr_local_change(pwr_dc_in_detection);
+
+	// we may get false HPD signals, get it being stablized
+	hpd_reported_event = hpd_none;
+	hook_call_deferred(hpd_lvl_deferred, POWER_SIGNALS_DEBOUNCE2_INTERVAL);
+
+	// task_wake(TASK_ID_PD_P1);
+}
+DECLARE_DEFERRED(pwr_in_debounce);
 
 void pwr_in_event(enum gpio_signal signal)
 {
-	ccprintf("DC-IN %d, %d!\n", signal, gpio_get_level(signal));
-	// task_wake(TASK_ID_PD_P1);
+	pwr_dc_in_detection = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
+	ccprintf("DC-IN %d!\n", pwr_dc_in_detection);
+
+	//hook_call_deferred(pwr_in_debounce, POWER_SIGNALS_DEBOUNCE_INTERVAL);
 }
+#endif
+#endif
 
 // must be after GPIO's signal definition
 #include "gpio_list.h"
@@ -342,6 +367,15 @@ static void board_init_spi2(void)
 }
 #endif /* CONFIG_SPI_FLASH */
 
+#ifdef CONFIG_BIZ_EMU_HOST
+void pd_task_dummy(void)
+{
+	int port = TASK_ID_TO_PORT(task_get_current());
+	if (port == 0) {
+		while (1) task_wait_event(5000*MSEC);
+	}
+}
+#endif
 
 /* Initialize board. */
 static void board_init(void)
@@ -368,10 +402,20 @@ static void board_init(void)
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
 
-//#ifndef CONFIG_BIZ_EMU_HOST
+
 #if !defined(CONFIG_BIZ_HULK) && !defined(CONFIG_BIZ_EMU_HOST)
 	/* Enable interrupts on VBUS transitions. */
+#ifndef CONFIG_BIZ_HULK
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
+	gpio_enable_interrupt(GPIO_MCU_PWR_DC_IN_DET);
+	pwr_in_event(GPIO_MCU_PWR_DC_IN_DET);
+#endif
+
+#ifdef CONFIG_BIZ_HULK
+	ccprintf("[hook]pd_check_charger_deferred %d\n",POWER_SIGNALS_DEBOUNCE_INTERVAL);
+	hook_call_deferred(pd_check_charger_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
+#endif
+
 #endif
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);

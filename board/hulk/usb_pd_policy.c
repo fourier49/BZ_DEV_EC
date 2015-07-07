@@ -26,7 +26,7 @@
 
 //==============================================================================
 /* Define typical operating power and max power */
-#define OPERATING_POWER_MW 15000
+#define OPERATING_POWER_MW 12000
 #define MAX_POWER_MW       60000
 #define MAX_CURRENT_MA     3000
 
@@ -37,19 +37,28 @@
 #define INPUT_VOLTAGE_DEADBAND_MIN 9700
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_SUSPEND | PDO_FIXED_COMM_CAP)
+#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
 //#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
 
 const uint32_t pd_src_pdo[] = {
 		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-		PDO_FIXED(20000, 3000, PDO_FIXED_FLAGS),
+		PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
 const uint32_t pd_snk_pdo[] = {
-		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
+		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+/* current and previous selected PDO entry */
+static int volt_idx;
+static int last_volt_idx;
+
+/*charger conntected status flag used to decide if plug/unplug happen */
+static int charger_con_status_chaged_flag = 0;
+static int charger_pre_connect_status = 0;    //default will enter one time
+static int charger_cur_connect_st = 0;
 
 int pd_is_valid_input_voltage(int mv)
 {
@@ -85,37 +94,165 @@ int pd_check_requested_voltage(uint32_t rdo)
 	return EC_SUCCESS;
 }
 
+void set_output_voltage(int vidx)
+{
+#ifndef CONFIG_BIZ_EMU_HOST
+	//extern int pwr_dc_in_detection;
+
+	gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+	gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
+
+	if (vidx == PDO_IDX_SRC_5V) {
+		gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+		CPRINTF("SRC 5V\n");
+	}
+	else
+	if (vidx == PDO_IDX_SRC_20V) {
+		gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 1);
+		//gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+		CPRINTF("SRC 20V\n");
+	}
+	else
+	if (vidx == PDO_IDX_SNK_VBUS) {
+		//CPRINTF("SNK VBUS %d\n", pwr_dc_in_detection);
+		CPRINTF("SNK VBUS %d\n");
+	//	if (!pwr_dc_in_detection)
+	//		gpio_set_level(GPIO_USB_P0_PWR_VBUS_EN, 1);
+		;
+	}
+	else
+		CPRINTF("no PWR\n");
+#endif
+}
+
+void discharge_voltage(int target_vidx)
+{
+	// gpio_set_level(GPIO_USB_P0_PWR_DISCHARGE, 1);
+}
+
 void pd_transition_voltage(int idx)
 {
-	/* No-operation: we are always 5V */
+	last_volt_idx = volt_idx;
+	volt_idx = idx - 1;
+	CPRINTF("Xsit Vol: %d %d\n", last_volt_idx, volt_idx);
+	if (volt_idx < last_volt_idx) { /* down voltage transition */
+#if 0
+		/* Stop OCP monitoring */
+		adc_disable_watchdog();
+
+		discharge_volt_idx = volt_idx;
+		/* from 20V : do an intermediate step at 12V */
+		if (volt_idx == PDO_IDX_SRC_5V && last_volt_idx == PDO_IDX_SRC_20V)
+			volt_idx = PDO_IDX_12V;
+		discharge_voltage(voltages[volt_idx].ovp);
+#else
+		discharge_voltage(PDO_IDX_SRC_5V);//do nothing
+		set_output_voltage(PDO_IDX_SRC_5V);
+#endif
+	} else if (volt_idx > last_volt_idx) { /* up voltage transition */
+#if 0
+		if (discharge_is_enabled()) {
+			/* Make sure discharging is disabled */
+			discharge_disable();
+			/* Enable over-current monitoring */
+			adc_enable_watchdog(ADC_CH_A_SENSE,
+					    MAX_CURRENT_FAST, 0);
+		}
+#else
+		set_output_voltage(PDO_IDX_SRC_20V);
+#endif
+	}
 }
+
+#ifndef CONFIG_BIZ_EMU_HOST
+void check_pr_role(int port, int local_pwr)
+{
+	int pr_role;
+	int flags = pd_get_flags(port, &pr_role);
+	int partner_extpower = flags & PD_FLAGS_PARTNER_EXTPOWER;
+    
+	CPRINTF("check_pr_role:port:%d,local_pwr:%d,pr_role:%s,p-exp:%d\n",
+			port,
+			local_pwr,
+			(pr_role==PD_ROLE_SOURCE)?"src":"snk",
+			partner_extpower
+	      );
+    	
+	if (local_pwr) {
+		// with local power, but only up-charging to a unpowered Host
+		if (!partner_extpower && pr_role == PD_ROLE_SINK) {
+			CPRINTF("PRSW: SNK->SRC\n");
+			pd_request_power_swap(port);
+		}
+	}
+	else {
+		// w/o local power, but request power from the Host
+		if (pr_role == PD_ROLE_SOURCE) {
+			CPRINTF("PRSW: SRC->SNK\n");
+			pd_request_power_swap(port);
+		}
+	}
+}
+
+void pd_pwr_local_change(int pwr_in)
+{
+    //int pr_role = 0;
+	CPRINTF("PWR DC %d 5V:%d 20V:%d chg:%d c1_con:%d cst:%d\n", pwr_in,
+	                         		     gpio_get_level(GPIO_USB_P0_PWR_5V_EN),
+						     gpio_get_level(GPIO_USB_P0_PWR_20V_EN),
+						     charger_con_status_chaged_flag,
+						     charger_pre_connect_status,
+						     charger_cur_connect_st
+			);
+	if (pwr_in) {
+		CPRINTF("SRC DC-in\n");
+		 gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
+	}
+	else {
+		if (gpio_get_level(GPIO_USB_P0_PWR_5V_EN)
+		||  gpio_get_level(GPIO_USB_P0_PWR_20V_EN)) {
+		
+			// No DC, thus shutdown to source power
+			CPRINTF("SRC no-DC\n");
+			gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+			set_output_voltage(PDO_IDX_OFF);
+		}
+	}
+	check_pr_role( 0, pwr_in );
+}
+#endif
 
 int pd_set_power_supply_ready(int port)
 {
+	if(volt_idx== PDO_IDX_SRC_5V)
+ 	{
 	/* provide VBUS */
 #ifdef CONFIG_BIZ_EMU_HOST
 	if (port == 1)  gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 1);
 #else
-	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+ 	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
 #endif
-
+	}
 	/* notify host of power info change */
-//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
-
+	//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
+    	CPRINTF("setpw_reset p:%d volt:%d\n",port,volt_idx);
 	return EC_SUCCESS; /* we are ready */
 }
 
 void pd_power_supply_reset(int port)
 {
+	if(volt_idx== PDO_IDX_SRC_5V)
+ 	{
 	/* Kill VBUS */
 #ifdef CONFIG_BIZ_EMU_HOST
 	if (port == 1)  gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 0);
 #else
 	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
 #endif
-
+	 }
 	/* notify host of power info change */
-//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
+    // pd_send_host_event(PD_EVENT_POWER_CHANGE);
+	CPRINTF("setpw_reset p:%d\n",port);
 }
 
 void pd_set_input_current_limit(int port, uint32_t max_ma,
@@ -188,6 +325,16 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 	 * If partner is dual-role power and dualrole toggling is on, consider
 	 * if a power swap is necessary.
 	 */
+#if 0 
+// TODO: we temporarily disable this checking for auto PR-SWAP
+//       instead, use console command for the moment. Will need to get it AUTO later...
+#ifdef CONFIG_BIZ_EMU_HOST
+#else
+
+	extern int pwr_dc_in_detection;
+
+	if (!pwr_dc_in_detection) return;
+
 	if ((flags & PD_FLAGS_PARTNER_DR_POWER) &&
 	    pd_get_dual_role() == PD_DRP_TOGGLE_ON) {
 		/*
@@ -200,14 +347,50 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 		     (partner_extpower && pr_role == PD_ROLE_SOURCE))
 			pd_request_power_swap(port);
 	}
+#endif
+#endif
+	CPRINTF("pd_check_pr_role:%d\n",port);
 }
 
 void pd_check_dr_role(int port, int dr_role, int flags)
 {
+#ifdef CONFIG_BIZ_EMU_HOST
 	/* If UFP, try to switch to DFP */
 	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
 		pd_request_data_swap(port);
+#else
+	/* If DFP, try to switch to UFP */
+	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_DFP)
+		pd_request_data_swap(port);
+#endif
 }
+
+                      
+void pd_check_charger_deferred(void)
+{
+	uint32_t delay = 20*MSEC;
+	charger_cur_connect_st =  pd_is_connected(1)&pd_get_cc_state(1);
+	charger_con_status_chaged_flag = charger_pre_connect_status^charger_cur_connect_st;
+    charger_pre_connect_status = charger_cur_connect_st ;
+	if( charger_con_status_chaged_flag )
+	{
+		pd_pwr_local_change(charger_pre_connect_status );
+		CPRINTF("[hook]check charger\n");
+    }
+	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))//20ms
+		CPRINTF("warning\n");
+}
+DECLARE_DEFERRED(pd_check_charger_deferred);
+
+static int command_charger(int argc, char **argv)
+{
+ccprintf("changed:%d,connected:%d,cc:%d \n",charger_con_status_chaged_flag,charger_cur_connect_st,pd_get_cc_state(1));
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(chg, command_charger,
+			"<port>",
+			"charger info",
+			NULL);
 
 /* ----------------- Vendor Defined Messages ------------------ */
 
