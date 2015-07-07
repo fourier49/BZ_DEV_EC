@@ -463,7 +463,7 @@ static inline void set_state(int port, enum pd_states next_state)
 		disable_sleep(SLEEP_MASK_USB_PD);
 #endif
 
-	CPRINTS("C%d st%s\n", port, pd_state_names[next_state]);
+	CPRINTS("C%d %s\n", port, pd_state_names[next_state]);
 }
 
 /* increment message ID counter */
@@ -705,22 +705,36 @@ static void send_sink_cap(int port)
 {
 	int bit_len;
 	uint16_t header = 0;
-	if(pd_is_connected(1)&pd_get_cc_state(1))
+	if(port == 0)
 	{
-		 header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
-		 pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
+		if(!(pd_is_connected(1)&pd_get_cc_state(1)))
+		{
+			 header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
+			 pd[port].data_role, pd[port].msg_id, default_pd_snk_pdo_cnt);
 
-		bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
-					pd_snk_pdo);
+			bit_len = send_validate_message(port, header, default_pd_snk_pdo_cnt,
+						default_pd_snk_pdo);
 
-	}else
-	{
+			CPRINTF("Return default snkCAP \n");
+
+		}else
+		{
+				header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
+				pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
+
+				bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
+						pd_snk_pdo);
+
+				CPRINTF("Return external power snkCAP \n");
+		}
+	}else{
 			header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
-			pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
+			 pd[port].data_role, pd[port].msg_id, default_pd_snk_pdo_cnt);
 
-			bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
-					pd_snk_pdo);
-		
+			bit_len = send_validate_message(port, header, default_pd_snk_pdo_cnt,
+						default_pd_snk_pdo);
+
+			CPRINTF("Return default snkCAP \n");
 	}
 	
 	if (debug_level >= 1)
