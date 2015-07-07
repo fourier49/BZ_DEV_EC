@@ -54,6 +54,9 @@
 /* Minimum ilim = 500 mA */
 #define CONFIG_CHARGER_INPUT_CURRENT PWM_0_MA
 #define CONFIG_HW_CRC
+#define CONFIG_RSA
+#define CONFIG_RWSIG
+#define CONFIG_SHA256
 #undef  CONFIG_I2C
 #undef  CONFIG_LID_SWITCH
 #define CONFIG_STM_HWTIMER32
