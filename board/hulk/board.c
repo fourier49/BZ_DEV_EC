@@ -377,6 +377,7 @@ void pd_task_dummy(void)
 }
 #endif
 
+extern enum pd_dual_role_states drp_states[PD_PORT_COUNT];
 /* Initialize board. */
 static void board_init(void)
 {
@@ -402,8 +403,12 @@ static void board_init(void)
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
 
-
-#if !defined(CONFIG_BIZ_HULK) && !defined(CONFIG_BIZ_EMU_HOST)
+#ifdef CONFIG_BIZ_EMU_HOST
+	drp_states[0] = PD_DRP_TOGGLE_ON;
+	drp_states[1] = PD_DRP_TOGGLE_ON;
+#else
+	drp_states[0] = PD_DRP_TOGGLE_ON;
+	drp_states[1] = PD_DRP_TOGGLE_OFF;
 	/* Enable interrupts on VBUS transitions. */
 #ifndef CONFIG_BIZ_HULK
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);

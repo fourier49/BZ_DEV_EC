@@ -724,7 +724,7 @@ enum pd_dual_role_states {
  *
  * @return Current dual-role state, from enum pd_dual_role_states
  */
-enum pd_dual_role_states pd_get_dual_role(void);
+enum pd_dual_role_states pd_get_dual_role(int port);
 /**
  * Set dual role state, from among enum pd_dual_role_states
  *
@@ -732,6 +732,7 @@ enum pd_dual_role_states pd_get_dual_role(void);
  *              enum pd_dual_role_states
  */
 void pd_set_dual_role(enum pd_dual_role_states state);
+void pd_set_dual_role_port(int port,enum pd_dual_role_states state);
 
 /**
  * Get role, from among PD_ROLE_SINK and PD_ROLE_SOURCE
