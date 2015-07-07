@@ -561,26 +561,23 @@ static int dp_status(int port, uint32_t *payload)
 	return 2;
 }
 
-extern void hpd_irq_deferred(void);
-extern void hpd_lvl_deferred(void);
+
 static void dp_switch_4L_2L(void)
 {
-	// enable DP AUX
-	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+	enum hpd_event ev;
 
-#ifndef CONFIG_BIZ_HULK
+#if 0
 	// send RESET pulse to external peripherals
 	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
 	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  1);
-
+#endif
+#if 0
 	usleep(300);
 	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
+	usleep(300);
 #endif
-	usleep(300);
-	hpd_irq_deferred();
-
-	usleep(300);
-	hpd_lvl_deferred();
+	ev = (gpio_get_level(GPIO_USB_P0_DP_HPD)) ? hpd_high : hpd_low;
+	pd_send_hpd(0, ev);
 }
 DECLARE_DEFERRED(dp_switch_4L_2L);
 
@@ -595,21 +592,28 @@ static int dp_config(int port, uint32_t *payload)
 #endif
 		return 1;
 	}
-#ifndef CONFIG_BIZ_HULK
-	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
 
+	// enable DP AUX
+	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+
+#if 0
 	// send RESET pulse to external peripherals
+	//gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
 	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
 	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
+#endif
 
 	// DP 4 lanes / 2 lanes switch
-	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_C)
+#ifndef CONFIG_BIZ_HULK
+	if (PD_VDO_MODE_DP_SRCP(payload[1]) & MODE_DP_PIN_C)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 1);  // 4 lanes
 	else
-	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_D)
+	if (PD_VDO_MODE_DP_SRCP(payload[1]) & MODE_DP_PIN_D)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
 #endif
-	hook_call_deferred(dp_switch_4L_2L, 20 * MSEC);
+	CPRINTS("DP_CFG:%x", payload[1]);
+	hook_call_deferred(dp_switch_4L_2L, 50 * MSEC);
+	//hook_call_deferred(dp_switch_4L_2L, 300);
 	return 1;
 }
 
