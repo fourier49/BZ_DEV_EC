@@ -1137,6 +1137,10 @@ extern const int pd_src_pdo_cnt;
 extern const uint32_t pd_snk_pdo[];
 extern const int pd_snk_pdo_cnt;
 
+
+extern const uint32_t default_pd_snk_pdo[];
+extern const int default_pd_snk_pdo_cnt;
+
 /**
  * Get PD source power data objects.
  *

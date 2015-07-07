@@ -704,11 +704,25 @@ static int send_source_cap(int port)
 static void send_sink_cap(int port)
 {
 	int bit_len;
-	uint16_t header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
+	uint16_t header = 0;
+	if(pd_is_connected(1)&pd_get_cc_state(1))
+	{
+		 header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
+		 pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
+
+		bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
+					pd_snk_pdo);
+
+	}else
+	{
+			header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
 			pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
 
-	bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
+			bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
 					pd_snk_pdo);
+		
+	}
+	
 	if (debug_level >= 1)
 		CPRINTF("snkCAP>%d\n", bit_len);
 }
@@ -3219,6 +3233,18 @@ static int command_pd(int argc, char **argv)
 				pd_set_dual_role(PD_DRP_FORCE_SINK);
 			else if (!strcasecmp(argv[2], "source"))
 				pd_set_dual_role(PD_DRP_FORCE_SOURCE);
+			else
+				return EC_ERROR_PARAM3;
+		}else {
+			port = strtoi(argv[3], &e, 10);
+			if (!strcasecmp(argv[2], "on"))
+				pd_set_dual_role_port(port,PD_DRP_TOGGLE_ON);
+			else if (!strcasecmp(argv[2], "off"))
+				pd_set_dual_role_port(port,PD_DRP_TOGGLE_OFF);
+			else if (!strcasecmp(argv[2], "sink"))
+				pd_set_dual_role_port(port,PD_DRP_FORCE_SINK);
+			else if (!strcasecmp(argv[2], "source"))
+				pd_set_dual_role_port(port,PD_DRP_FORCE_SOURCE);
 			else
 				return EC_ERROR_PARAM3;
 		}

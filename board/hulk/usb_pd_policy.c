@@ -38,11 +38,12 @@
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
-//#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
+#define DEFAULT_PDO_FIXED_FLAGS 0
 
+//default source capability pdo.
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-		PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_20V] = PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
@@ -50,6 +51,13 @@ const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+const uint32_t default_pd_snk_pdo[] = {
+		PDO_FIXED(5000, 500, DEFAULT_PDO_FIXED_FLAGS),
+};
+const int default_pd_snk_pdo_cnt = ARRAY_SIZE(default_pd_snk_pdo);
+
+
 
 /* current and previous selected PDO entry */
 static int volt_idx;
@@ -366,20 +374,61 @@ void pd_check_dr_role(int port, int dr_role, int flags)
 #endif
 }
 
+static int vol_check_retry_times = 0;
+void pd_check_charger_power_nego_done_deferred(void)
+{
+
+	int mv =  adc_read_channel(ADC_P1_20VBUS_DT);
+      int cnt = 5;
+	while(cnt-- > 0)
+	{
+		mv += adc_read_channel(ADC_P1_20VBUS_DT);
+		mv = mv/2;
+		msleep(1);//sleep 1 ms
+		CPRINTF("mv:%d\n",mv);
+	}
+	  
+	//if vbus 20v is done.
+    //fixme,we should check the voltage by real requested voltage.
+	if( mv > 1000)
+	{
+		pd_pwr_local_change(1 );
+		
+	}else
+	{
+		if(vol_check_retry_times-- > 0)
+		{
+			if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 50*MSEC))
+				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
+		}
+	}
+	
+}
+DECLARE_DEFERRED(pd_check_charger_power_nego_done_deferred);
                       
 void pd_check_charger_deferred(void)
 {
-	uint32_t delay = 20*MSEC;
+	uint32_t delay = 5*MSEC;
 	charger_cur_connect_st =  pd_is_connected(1)&pd_get_cc_state(1);
 	charger_con_status_chaged_flag = charger_pre_connect_status^charger_cur_connect_st;
     charger_pre_connect_status = charger_cur_connect_st ;
 	if( charger_con_status_chaged_flag )
 	{
-		pd_pwr_local_change(charger_pre_connect_status );
-		CPRINTF("[hook]check charger\n");
+		 if(charger_cur_connect_st)
+	     {
+	       	CPRINTF("charger connected\n");
+			vol_check_retry_times= 10;
+	        if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 50*MSEC))
+				CPRINTF("[hook fail] call check charger pwr nego done\n");
+
+		 }else
+		 {
+			pd_pwr_local_change(charger_cur_connect_st);
+				CPRINTF("charger disconnected\n");
+		 }
     }
-	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))//20ms
-		CPRINTF("warning\n");
+	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))
+		CPRINTF("[hook fail] call check charger \n");
 }
 DECLARE_DEFERRED(pd_check_charger_deferred);
 
