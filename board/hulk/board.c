@@ -433,14 +433,13 @@ const struct adc_t adc_channels[] = {
 	[ADC_P0_CC_PD]  = {"P0_CC_PD",  3300, 4096, 0, STM32_AIN(0)},
 	[ADC_P1_CC1_PD] = {"P1_CC1_PD", 3300, 4096, 0, STM32_AIN(2)},
 	[ADC_P1_CC2_PD] = {"P1_CC2_PD", 3300, 4096, 0, STM32_AIN(5)},
-
+      [ADC_P1_VBUS_DT] = {"P1_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(6)},   //P1 vbus detect	
+	[ADC_P0_VBUS_DT] = {"P0_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(15)},   //P0 vbus detect	
+	[ADC_P1_20VBUS_DT] = {"USB_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(3)},   //P1 20V vbus detect
 	/* Vbus sensing. Converted to mV, full ADC is equivalent to 25.774V. */
 	[ADC_BOOSTIN] = {"V_BOOSTIN",  25774, 4096, 0, STM32_AIN(11)},
 	
-	[ADC_P0_VBUS_DT] = {"USB_C_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(15)},   //P0 vbus detect
-	[ADC_P1_VBUS_DT] = {"USB_C_RECEPTACLE_DETECT",  3300, 4096, 0, STM32_AIN(6)},   //P1 vbus detect
-	[ADC_P1_20VBUS_DT] = {"USB_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(3)},   //P1 20V vbus detect
-};
+	};
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
 /* I2C ports */

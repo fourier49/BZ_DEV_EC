@@ -463,7 +463,7 @@ static inline void set_state(int port, enum pd_states next_state)
 		disable_sleep(SLEEP_MASK_USB_PD);
 #endif
 
-	CPRINTF("C%d st%d\n", port, next_state);
+	CPRINTS("C%d st%s\n", port, pd_state_names[next_state]);
 }
 
 /* increment message ID counter */

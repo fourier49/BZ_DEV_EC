@@ -378,14 +378,14 @@ static int vol_check_retry_times = 0;
 void pd_check_charger_power_nego_done_deferred(void)
 {
 
-	int mv =  adc_read_channel(ADC_P1_20VBUS_DT);
+	int mv =  adc_read_channel(ADC_P1_VBUS_DT);
       int cnt = 5;
 	while(cnt-- > 0)
 	{
-		mv += adc_read_channel(ADC_P1_20VBUS_DT);
+		mv += adc_read_channel(ADC_P1_VBUS_DT);
 		mv = mv/2;
-		msleep(1);//sleep 1 ms
-		CPRINTF("mv:%d\n",mv);
+		msleep(10);//sleep 1 ms
+		CPRINTS("[%d]mv:%d\n",vol_check_retry_times,mv);
 	}
 	  
 	//if vbus 20v is done.
@@ -398,7 +398,7 @@ void pd_check_charger_power_nego_done_deferred(void)
 	{
 		if(vol_check_retry_times-- > 0)
 		{
-			if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 50*MSEC))
+			if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 1000*MSEC))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 		}
 	}
@@ -408,17 +408,17 @@ DECLARE_DEFERRED(pd_check_charger_power_nego_done_deferred);
                       
 void pd_check_charger_deferred(void)
 {
-	uint32_t delay = 5*MSEC;
+	uint32_t delay = 100*MSEC;
 	charger_cur_connect_st =  pd_is_connected(1)&pd_get_cc_state(1);
 	charger_con_status_chaged_flag = charger_pre_connect_status^charger_cur_connect_st;
-    charger_pre_connect_status = charger_cur_connect_st ;
+      charger_pre_connect_status = charger_cur_connect_st ;
 	if( charger_con_status_chaged_flag )
 	{
 		 if(charger_cur_connect_st)
 	     {
 	       	CPRINTF("charger connected\n");
 			vol_check_retry_times= 10;
-	        if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 50*MSEC))
+	        if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 800*MSEC))
 				CPRINTF("[hook fail] call check charger pwr nego done\n");
 
 		 }else
@@ -426,7 +426,7 @@ void pd_check_charger_deferred(void)
 			pd_pwr_local_change(charger_cur_connect_st);
 				CPRINTF("charger disconnected\n");
 		 }
-    }
+     }
 	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))
 		CPRINTF("[hook fail] call check charger \n");
 }
