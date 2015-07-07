@@ -10,10 +10,10 @@
 //-------------------------------------------------------------------------------------
 #ifndef CONFIG_BIZ_EMU_HOST
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
-GPIO_INT(USB_P0_DP_HPD,          A, 3,  GPIO_INT_BOTH, hpd_event) /*Hulk , high means plug-in*/
+GPIO_INT(USB_P0_DP_HPD,          B, 5,  GPIO_INT_BOTH, hpd_event) /*Hulk , high means plug-in*/
 #endif
-GPIO_INT(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
-GPIO_INT(MCU_PWR_DC_IN_DET,      B, 5,  GPIO_INT_BOTH, pwr_in_event)
+//GPIO_INT(USB_P0_VBUS_WAKE,       B, 12, GPIO_INT_BOTH, vbus0_evt)
+//GPIO_INT(MCU_PWR_DC_IN_DET,      B, 12,  GPIO_INT_BOTH, pwr_in_event) /*Hulk didn't use this pin*/
 #endif
 
 #ifdef CONFIG_BIZ_DUAL_CC
@@ -59,9 +59,9 @@ GPIO(USB_P0_PWROLE_SRC,      B, 7, GPIO_OUT_LOW)   /* Hulk , active HIGH */
 
 
 /* UFP Power Provider */    
-GPIO(USB_P0_PWR_5V_EN,       B, 6,  GPIO_OUT_HIGH)   /* Hulk active HIGH, enable 5V to Port 1 */
-GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_HIGH)   /* Hulk active HIGH, enable 12V - 20V to Port 1 */
-GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_HIGH)   /* Hulk active HIGH, enable vbus to Port 1 */
+GPIO(USB_P0_PWR_5V_EN,       B, 6,  GPIO_OUT_LOW)   /* Hulk active HIGH, enable 5V to VBUS of port 0*/
+GPIO(USB_P0_PWR_20V_EN,      B, 2,  GPIO_OUT_LOW)   /* Hulk active HIGH, enable 12V - 20V to VBUS of  port 0 */
+//GPIO(USB_P0_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)   /* Hulk active HIGH, enable vbus to VBUS of  port 0 */      remove in v2.0
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -82,21 +82,25 @@ GPIO(USB_P1_CC1_PWROLE_SRC,  A, 15, GPIO_OUT_HIGH)
 GPIO(USB_P1_CC2_PWROLE_SRC,  A, 6,  GPIO_OUT_HIGH)
 
 /* DFP Power Provider */   
-GPIO(USB_P1_PWR_5V_EN,       B, 7,  GPIO_OUT_HIGH)   /* DFP providing 5V  over VBUS to UFP, active HIGH */
-GPIO(USB_P1_PWR_20V_EN,      B, 6,  GPIO_OUT_LOW)    /* DFP providing 20V over VBUS to UFP, active HIGH */
-GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)    /* DFP get power from VBUS by UFP,     active HIGH */
+GPIO(USB_P1_PWR_5V_EN,         B, 7,  GPIO_OUT_LOW)   /* DFP providing 5V  over VBUS to UFP, active HIGH */
+GPIO(USB_P1_PWR_20V_EN,        B, 6,  GPIO_OUT_LOW)    /* DFP providing 20V over VBUS to UFP, active HIGH */
+//GPIO(USB_P1_PWR_VBUS_EN,     B, 8,  GPIO_OUT_LOW)    /* DFP get power from VBUS by UFP,     active HIGH */
 #endif
 
 #if defined(CONFIG_BIZ_DUAL_CC) && defined(CONFIG_BIZ_HULK)
-GPIO(USB_P0_MCU_WAKE,        B, 12, GPIO_ANALOG)		/*Hulk use to detect the voltage from Port1*/
+//GPIO(USB_P0_MCU_WAKE,        B, 12, GPIO_ANALOG)		/*Hulk use to detect the voltage from Port1*/
 #endif
 
+GPIO(USB_VBUS_DETECT,            A, 3,  GPIO_ANALOG)    /*Hulk PA3 USB_VBUS_DETECT , vbus voltage after mos4*/
+GPIO(USB_C_RECEPTACLE_DETECT,    A, 6,  GPIO_ANALOG)    /*Hulk PA6 RECEPTACLE VBUS*/
+GPIO(USB_C_VBUS_DETECT,          A, 15,  GPIO_ANALOG)   /*Hulk PA15 PLUG VBUS*/
 
 /* Discarge signals */
 GPIO(UP_Discharge,     B, 11, GPIO_OUT_LOW)		/*Hulk ,port 0 discharge , high enable*/
-GPIO(VBUS_UP_CTRL1,    C, 15, GPIO_OUT_HIGH)	/*Hulk ,port 0 vbus power control , high will provide power to port*/
+GPIO(VBUS_UP_CTRL1,    C, 15, GPIO_OUT_LOW)		/*Hulk ,port 0 vbus power control . keep LOW*/
 GPIO(DS_Discharge,     B, 15, GPIO_OUT_LOW)   	/*Hulk ,port 1 discharge , high enable*/
-GPIO(VBUS_DS_CTRL1,    C, 14, GPIO_OUT_LOW)   	/*Hulk ,port 1 vbus power control , high will provide power to port*/
+GPIO(VBUS_DS_CTRL1,    C, 14, GPIO_OUT_LOW)   	/*Hulk ,port 1 vbus power control . default LOW*/
+
 /* Misc signals */
 GPIO(LED_CONTROL,      C, 13, GPIO_OUT_HIGH)	/*Hulk ,LED control , high enable*/
 

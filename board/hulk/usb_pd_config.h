@@ -209,8 +209,11 @@ static inline void pd_tx_init(void)
 
 static inline void pd_set_host_mode(int port, int enable)
 {
+	//ccprintf("hostMode p:%d en:%d\n", port, enable);
+#ifndef CONFIG_BIZ_EMU_HOST
 	if (port == 0) {
 		if (enable) {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 1);
 			/* We never charging in power source mode */
 //			gpio_set_level(GPIO_USB_P0_CHARGE_EN_L, 1);
 
@@ -218,8 +221,10 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 1);
 //			gpio_set_level(GPIO_USB_P0_CC2_ODL, 1);
 		} else {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 0);
 			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P0_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 0);
@@ -227,9 +232,15 @@ static inline void pd_set_host_mode(int port, int enable)
 
 			/* Let charge_manager decide to enable the port */
 		}
-#ifdef CONFIG_BIZ_DUAL_CC
-	} else {
+	}
+#endif
+
+#ifdef CONFIG_BIZ_EMU_HOST
+	if (port == 1) {
 		if (enable) {
+			gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 1);
+			gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 1);
+
 			/* We never charging in power source mode */
 //			gpio_set_level(GPIO_USB_P1_CHARGE_EN_L, 1);
 
@@ -237,16 +248,20 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P1_CC1_ODL, 1);
 //			gpio_set_level(GPIO_USB_P1_CC2_ODL, 1);
 		} else {
+			gpio_set_level(GPIO_USB_P1_CC1_PWROLE_SRC, 0);
+			gpio_set_level(GPIO_USB_P1_CC2_PWROLE_SRC, 0);
+
 			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P1_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P1_PWR_20V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P1_CC1_ODL, 0);
 //			gpio_set_level(GPIO_USB_P1_CC2_ODL, 0);
 			/* Let charge_manager decide to enable the port */
 		}
-#endif
 	}
+#endif
 }
 
 /**
@@ -312,11 +327,11 @@ static inline void pd_set_vconn(int port, int polarity, int enable)
 
 static inline int pd_snk_is_vbus_provided(int port)
 {
+#if 0
 #ifdef __BIZ_EMU_BUILD__
 	return 1;
 #else
-//#ifdef CONFIG_BIZ_DUAL_CC
-#if defined(CONFIG_BIZ_DUAL_CC) && !defined(CONFIG_BIZ_HULK)
+#ifdef CONFIG_BIZ_DUAL_CC
 	return gpio_get_level(port ? GPIO_USB_P1_VBUS_WAKE :
 				     GPIO_USB_P0_VBUS_WAKE);
 #else
@@ -326,6 +341,14 @@ static inline int pd_snk_is_vbus_provided(int port)
 	*/
 	return 1;
 #endif
+#endif
+#else
+	// Note we simply ignore the detection of VBUS presence here
+	// since we have no circuit in place for the current HW rev
+	enum pd_states state = pd_get_state(port);
+	if (state == PD_STATE_SNK_DISCONNECTED)
+		return 0;
+	return 1;
 #endif
 }
 
@@ -369,9 +392,9 @@ static inline int pd_snk_is_vbus_provided(int port)
 #define PD_POWER_SUPPLY_TURN_OFF_DELAY 250000 /* us */
 
 /* Define typical operating power and max power */
-#define PD_OPERATING_POWER_MW 15000
+#define PD_OPERATING_POWER_MW 1000
 #define PD_MAX_POWER_MW       60000
-#define PD_MAX_CURRENT_MA     3000
+#define PD_MAX_CURRENT_MA     300
 #define PD_MAX_VOLTAGE_MV     20000
 
 #endif /* __USB_PD_CONFIG_H */
