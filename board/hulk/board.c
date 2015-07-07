@@ -259,6 +259,7 @@ const void * const usb_strings[] = {
 	[USB_STR_PRODUCT] = USB_STRING_DESC(CONFIG_USB_PRODUCT_STR),
 	[USB_STR_VERSION] = USB_STRING_DESC(CROS_EC_VERSION32),
 	[USB_STR_BB_URL] = USB_STRING_DESC(CONFIG_USB_BB_URL),
+	[USB_STR_CONSOLE_NAME] = USB_STRING_DESC("Shell"),
 };
 BUILD_ASSERT(ARRAY_SIZE(usb_strings) == USB_STR_COUNT);
 
@@ -309,7 +310,7 @@ static struct my_bos bos_desc = {
 	},
 	.bb_caps_svids = {
 		{
-			.wSVID = 0xff01, /* TODO(tbroch) def'd in other CL remove hardcode */
+			.wSVID = USB_SID_DISPLAYPORT,
 			.bAlternateMode = 1,
 			.iAlternateModeString = USB_STR_BB_URL, /* TODO(crosbug.com/p/32687) */
 		},
