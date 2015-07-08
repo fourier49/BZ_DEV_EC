@@ -43,9 +43,18 @@
 //default source capability pdo.
 const uint32_t pd_src_pdo[] = {
 	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-	[PDO_IDX_SRC_20V] = PDO_FIXED(12000, 2000, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_20V] = PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
+
+
+//default source capability pdo.
+const uint32_t default_pd_src_pdo[] = {
+	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, DEFAULT_PDO_FIXED_FLAGS),
+};
+const int default_pd_src_pdo_cnt = ARRAY_SIZE(default_pd_src_pdo);
+
+
 
 const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
@@ -67,6 +76,27 @@ static int last_volt_idx;
 static int charger_con_status_chaged_flag = 0;
 static int charger_pre_connect_status = 0;    //default will enter one time
 static int charger_cur_connect_st = 0;
+
+int pd_get_source_pdo(const uint32_t **src_pdo)
+{
+	int cnt = 0;
+
+     
+
+	if(charger_cur_connect_st == 0)
+	{
+		*src_pdo = default_pd_snk_pdo;
+		cnt = default_pd_snk_pdo_cnt;
+		
+	}else{
+		*src_pdo = pd_src_pdo;
+		cnt = pd_src_pdo_cnt;
+	}
+
+	CPRINTF("pd_get_source_pdo cnt:%d default:%d \n", cnt,(charger_cur_connect_st==0)?1:0);
+	return cnt;
+}
+
 
 int pd_is_valid_input_voltage(int mv)
 {
@@ -243,7 +273,7 @@ int pd_set_power_supply_ready(int port)
 	}
 	/* notify host of power info change */
 	//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
-    	CPRINTF("setpw_reset p:%d volt:%d\n",port,volt_idx);
+    	CPRINTF("setpw_ready p:%d volt:%d\n",port,volt_idx);
 	return EC_SUCCESS; /* we are ready */
 }
 
@@ -393,13 +423,44 @@ void pd_check_charger_power_nego_done_deferred(void)
 	{
 		if(vol_check_retry_times-- > 0)
 		{
-			if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 1000*MSEC))
+			if(0 != hook_call_deferred(pd_check_charger_power_nego_done_deferred, 300*MSEC))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 		}
 	}
 	
 }
 DECLARE_DEFERRED(pd_check_charger_power_nego_done_deferred);
+
+
+//static int vsafe_check_retry_times = 0;
+void pd_cpower_unplung_deferred(void)
+{
+
+	//int mv =  adc_read_channel(ADC_P0_VBUS_DT);
+     
+	//CPRINTS("[cpower:%d]mv:%d\n",vsafe_check_retry_times,mv);
+	
+	  
+	//if vbus 5v is done.
+      //fixme,we should check the voltage by real requested voltage.
+	//if( mv > 1000)
+	//{
+	//	if(vol_check_retry_times-- > 0)
+	//	{
+		     //pd_hard_reset(0);
+	//		if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+	//			CPRINTF("[hook fail] call pd_cpower_unplung_deferred-r\n");
+	//	}
+	//}else
+	//{
+		//ask pr-swap here.
+		//gpio_set_level(GPIO_USB_P0_PWR_5V_EN,1);
+	      //msleep(10); 
+		pd_pwr_local_change(0);
+	//}
+	
+}
+DECLARE_DEFERRED(pd_cpower_unplung_deferred);
                       
 void pd_check_charger_deferred(void)
 {
@@ -418,8 +479,27 @@ void pd_check_charger_deferred(void)
 
 		 }else
 		 {
-			pd_pwr_local_change(charger_cur_connect_st);
-				CPRINTF("charger disconnected\n");
+		 		CPRINTF("charger disconnected\n");	
+				//vol_check_retry_times = 3;
+				//if (gpio_get_level(GPIO_USB_P0_PWR_5V_EN)
+				//||  gpio_get_level(GPIO_USB_P0_PWR_20V_EN)) {
+				
+					// No DC, thus shutdown to source power
+				//	CPRINTF("SRC no-DC\n");
+					gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+				      //gpio_set_level(GPIO_USB_P0_PWR_20V_EN,0);
+				     
+					//pd_hard_reset(0);
+				//	set_output_voltage(PDO_IDX_OFF);
+				//}
+				
+				// pd_prepare_sysjump();
+				
+				//pd_pwr_local_change(charger_cur_connect_st);
+				 if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+				   CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
+				   
+				
 		 }
      }
 	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))
