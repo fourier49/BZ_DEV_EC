@@ -43,7 +43,7 @@
 //default source capability pdo.
 const uint32_t pd_src_pdo[] = {
 	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-	[PDO_IDX_SRC_20V] = PDO_FIXED(12000, 1500, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_20V] = PDO_FIXED(12000, 2000, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
