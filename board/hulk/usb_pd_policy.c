@@ -38,12 +38,12 @@
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
-#define DEFAULT_PDO_FIXED_FLAGS 0
+#define DEFAULT_PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_COMM_CAP)
 
 //default source capability pdo.
 const uint32_t pd_src_pdo[] = {
 	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-	[PDO_IDX_SRC_20V] = PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_20V] = PDO_FIXED(12000, 1500, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
@@ -53,7 +53,7 @@ const uint32_t pd_snk_pdo[] = {
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
 const uint32_t default_pd_snk_pdo[] = {
-		PDO_FIXED(5000, 500, DEFAULT_PDO_FIXED_FLAGS),
+		PDO_FIXED(5000, 1500, DEFAULT_PDO_FIXED_FLAGS),
 };
 const int default_pd_snk_pdo_cnt = ARRAY_SIZE(default_pd_snk_pdo);
 
@@ -379,14 +379,9 @@ void pd_check_charger_power_nego_done_deferred(void)
 {
 
 	int mv =  adc_read_channel(ADC_P1_VBUS_DT);
-      int cnt = 5;
-	while(cnt-- > 0)
-	{
-		mv += adc_read_channel(ADC_P1_VBUS_DT);
-		mv = mv/2;
-		msleep(10);//sleep 1 ms
-		CPRINTS("[%d]mv:%d\n",vol_check_retry_times,mv);
-	}
+     
+	CPRINTS("[%d]mv:%d\n",vol_check_retry_times,mv);
+	
 	  
 	//if vbus 20v is done.
     //fixme,we should check the voltage by real requested voltage.

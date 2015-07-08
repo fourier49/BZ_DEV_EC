@@ -91,6 +91,7 @@ static int pd_find_pdo_index(int cnt, uint32_t *src_caps, int max_mv)
 		}
 #endif
 	}
+	 CPRINTS("[pd_find_pdo_index]Max Vo:%dmv A:%dma W:%dmw\n idx:%d",max_mv,PD_MAX_CURRENT_MA,max_uw,ret);
 	return ret;
 }
 

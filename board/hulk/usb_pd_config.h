@@ -412,7 +412,7 @@ void pd_check_charger_deferred(void);
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 1000
 #define PD_MAX_POWER_MW       60000
-#define PD_MAX_CURRENT_MA     300
-#define PD_MAX_VOLTAGE_MV     20000
+#define PD_MAX_CURRENT_MA     2000
+#define PD_MAX_VOLTAGE_MV     15000
 
 #endif /* __USB_PD_CONFIG_H */

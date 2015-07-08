@@ -695,7 +695,7 @@ static int send_source_cap(int port)
 
 	bit_len = send_validate_message(port, header, src_pdo_cnt, src_pdo);
 	if (debug_level >= 1)
-		CPRINTF("srcCAP>%d\n", bit_len);
+		CPRINTF("C%d:srcCAP>%d\n", port ,bit_len);
 
 	return bit_len;
 }
@@ -715,7 +715,7 @@ static void send_sink_cap(int port)
 			bit_len = send_validate_message(port, header, default_pd_snk_pdo_cnt,
 						default_pd_snk_pdo);
 
-			CPRINTF("Return default snkCAP \n");
+			CPRINTF("C%d:Return default snkCAP \n",port);
 
 		}else
 		{
@@ -725,7 +725,7 @@ static void send_sink_cap(int port)
 				bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
 						pd_snk_pdo);
 
-				CPRINTF("Return external power snkCAP \n");
+				CPRINTF("C%d:Return external power snkCAP \n",port);
 		}
 	}else{
 			header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
@@ -734,7 +734,7 @@ static void send_sink_cap(int port)
 			bit_len = send_validate_message(port, header, default_pd_snk_pdo_cnt,
 						default_pd_snk_pdo);
 
-			CPRINTF("Return default snkCAP \n");
+			CPRINTF("C%d:Return default snkCAP \n",port);
 	}
 	
 	if (debug_level >= 1)
@@ -749,7 +749,7 @@ static int send_request(int port, uint32_t rdo)
 
 	bit_len = send_validate_message(port, header, 1, &rdo);
 	if (debug_level >= 1)
-		CPRINTF("REQ%d>\n", bit_len);
+		CPRINTF("C%d:REQ%d>\n",port, bit_len);
 
 	return bit_len;
 }
