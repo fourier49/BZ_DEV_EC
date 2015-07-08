@@ -9,6 +9,9 @@
 //Bizlink
 #define DEVICE_ID "VID_06C4"
 
+#define STM_DEVICE_ID "VID_0483"
+//#define HP_DEVICE_ID "VID_03F0"
+
 CSTDevicesManager::CSTDevicesManager()
 {
 }
@@ -75,7 +78,8 @@ DWORD CSTDevicesManager::Open(CString sSymbName,
 		return STDEVICE_BADPARAMETER;
 
 	// Tries to create an object
-	if ((sSymbName.Find(DEVICE_ID) > 0))
+	//if ((sSymbName.Find(DEVICE_ID) > 0))
+	if((sSymbName.Find(STM_DEVICE_ID) < 0))
 	{
 		if (m_OpenDevices.GetCount() == 0)
 		{
