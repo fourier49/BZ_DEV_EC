@@ -368,7 +368,7 @@ void discharge_voltage(int target_vidx);
 void pd_pwr_local_change(int pwr_in);
 
 void pd_check_charger_deferred(void);
-
+int pd_handle_cpower_capbliity(int port, int cnt, uint32_t *src_caps);
 
 /* start as a sink in case we have no other power supply/battery */
 #ifdef CONFIG_BIZ_EMU_HOST
@@ -411,8 +411,10 @@ void pd_check_charger_deferred(void);
 
 /* Define typical operating power and max power */
 #define PD_OPERATING_POWER_MW 1000
-#define PD_MAX_POWER_MW       60000
-#define PD_MAX_CURRENT_MA     2000
+#define PD_MAX_POWER_MW      60000 //this value is used to calculated the real return amp.(in usb_pd_policy.c in ./common)
+#define PD_MAX_CURRENT_MA     3000
 #define PD_MAX_VOLTAGE_MV     20000
+
+#define PD_SELF_POWER_CONSUMPTION_UW	(6000000) //((900+300)*5000)	 //900MA+300MA ,5000MV
 
 #endif /* __USB_PD_CONFIG_H */

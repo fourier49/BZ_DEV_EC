@@ -166,6 +166,11 @@ void pd_process_source_cap(int port, int cnt, uint32_t *src_caps)
 	charge_manager_set_ceil(port, PD_MIN_MA);
 	pd_set_input_current_limit(port, ma, mv);
 #endif
+
+#ifdef CONFIG_EXTERNAL_CHARGE_ADAPTER
+   pd_handle_cpower_capbliity(port,cnt,src_caps);	
+#endif
+
 }
 
 void pd_set_max_voltage(unsigned mv)

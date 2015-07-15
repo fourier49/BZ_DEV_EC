@@ -26,9 +26,6 @@
 
 //==============================================================================
 /* Define typical operating power and max power */
-#define OPERATING_POWER_MW 12000
-#define MAX_POWER_MW       60000
-#define MAX_CURRENT_MA     3000
 
 /*
  * Do not request any voltage within this deadband region, where
@@ -40,17 +37,17 @@
 #define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
 #define DEFAULT_PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_COMM_CAP)
 
-//default source capability pdo.
-const uint32_t pd_src_pdo[] = {
-	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-	[PDO_IDX_SRC_20V] = PDO_FIXED(20000, 2000, PDO_FIXED_FLAGS),
+
+//we provide a dynamic source cap array.
+uint32_t valid_cpower_pd_src_cnt = 0;
+uint32_t valid_pd_src_pdo[] = {
+      	    PDO_FIXED(5000,  900, PDO_FIXED_FLAGS),
+           PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
 };
-const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
-
-//default source capability pdo.
+//default source capability pdo.we should not return this.to avoid sink ask too much power.
 const uint32_t default_pd_src_pdo[] = {
-	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  1500, DEFAULT_PDO_FIXED_FLAGS),
+	[PDO_IDX_SRC_5V]  = PDO_FIXED(5000,  500, DEFAULT_PDO_FIXED_FLAGS),
 };
 const int default_pd_src_pdo_cnt = ARRAY_SIZE(default_pd_src_pdo);
 
@@ -77,24 +74,76 @@ static int charger_con_status_chaged_flag = 0;
 static int charger_pre_connect_status = 0;    //default will enter one time
 static int charger_cur_connect_st = 0;
 
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
 int pd_get_source_pdo(const uint32_t **src_pdo)
 {
 	int cnt = 0;
+	if( (pd_is_connected(1)&pd_get_cc_state(1)) == 0){
+		*src_pdo = default_pd_src_pdo;
+		cnt = default_pd_src_pdo_cnt;
+		CPRINTF("[hulk]pd_get_source_pdo,return default cnt:%d\n",cnt);
+
+	}else{
+		*src_pdo = valid_pd_src_pdo;
+		cnt = valid_cpower_pd_src_cnt;
+		CPRINTF("[hulk]pd_get_source_pdo,return valid cnt:%d\n",cnt);
+	}
+	return cnt;
+}
+#endif
 
      
 
-	if(charger_cur_connect_st == 0)
-	{
-		*src_pdo = default_pd_snk_pdo;
-		cnt = default_pd_snk_pdo_cnt;
-		
-	}else{
-		*src_pdo = pd_src_pdo;
-		cnt = pd_src_pdo_cnt;
-	}
+int pd_handle_cpower_capbliity(int port, int cnt, uint32_t *src_caps)
+{
+	int i = 0;
+	int numa = 0;
+	uint32_t ma, mv;
+	uint32_t uw = 0;
+	//int pdo_index;
+      uint32_t pdo = 0;
+	int max_ma;
+	int max_uw = 0;
 
-	CPRINTF("pd_get_source_pdo cnt:%d default:%d \n", cnt,(charger_cur_connect_st==0)?1:0);
-	return cnt;
+	if(port == 0 )//when receive src cap from port-0,we don't need to save and process it.
+		return 0;
+
+ 	valid_cpower_pd_src_cnt = 1;//at least 1
+	for (i = 0; i < cnt; i++) {
+		
+		pdo= *(src_caps+i);		 
+		
+        mv = ((pdo >> 10) & 0x3FF) * 50;//unit is 50 mv
+
+		if ((pdo & PDO_TYPE_MASK) == PDO_TYPE_BATTERY) {
+			uw = 250000 * (pdo & 0x3FF);
+			max_ma = 1000 * MIN(1000 * uw, PD_MAX_POWER_MW) / mv;
+		} else {
+			max_ma = 10 * (pdo & 0x3FF); //unit is 10 ma
+			max_ma = MIN(max_ma, PD_MAX_POWER_MW * 1000 / mv);
+		}
+
+		ma = MIN(max_ma, PD_MAX_CURRENT_MA);
+		
+		CPRINTF("ma:%d max-ma%d \n", (10 * (pdo & 0x3FF)),max_ma);
+
+		uw = ma*mv;
+
+		if(uw > (PD_SELF_POWER_CONSUMPTION_UW))
+			uw -= (PD_SELF_POWER_CONSUMPTION_UW);
+
+		if(max_uw  <  uw)
+		{
+			max_uw = uw;
+			numa = uw/mv;
+			valid_pd_src_pdo[1] = PDO_FIXED(mv,numa, PDO_FIXED_FLAGS);
+			CPRINTF("[hulk] handle cpower_capbliity idx:%d mv:%d uw:%d new-ma%d \n", i, mv,uw,numa);
+		}
+	}
+	if(cnt > 1)//if receive src pdo.
+		valid_cpower_pd_src_cnt = 2;
+
+	return valid_cpower_pd_src_cnt;
 }
 
 
@@ -113,6 +162,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 	uint32_t pdo;
 	uint32_t pdo_ma;
 
+#if(0)
 	if (!idx || idx > pd_src_pdo_cnt)
 		return EC_ERROR_INVAL; /* Invalid index */
 
@@ -128,7 +178,35 @@ int pd_check_requested_voltage(uint32_t rdo)
 		return EC_ERROR_INVAL; /* too much op current */
 	if (max_ma > pdo_ma)
 		return EC_ERROR_INVAL; /* too much max current */
+#else
 
+      if(!( pd_is_connected(1)&pd_get_cc_state(1))){
+      	
+		CPRINTF("[hulk]No-CPower ,Requested %d V %d mA (for %d/%d mA)\n",
+		 ((pdo >> 10) & 0x3ff) * 50, (pdo & 0x3ff) * 10,
+		 ((rdo >> 10) & 0x3ff) * 10, (rdo & 0x3ff) * 10);
+
+		return EC_ERROR_INVAL; /* Invalid index */
+		
+	}else{
+		if (!idx || idx > valid_cpower_pd_src_cnt)
+			return EC_ERROR_INVAL; /* Invalid index */
+
+		/* check current ... */
+		pdo = valid_pd_src_pdo[idx - 1];
+		pdo_ma = (pdo & 0x3ff);
+
+		CPRINTF("Requested %d V %d mA (for %d/%d mA)\n",
+		 ((pdo >> 10) & 0x3ff) * 50, (pdo & 0x3ff) * 10,
+		 ((rdo >> 10) & 0x3ff) * 10, (rdo & 0x3ff) * 10);
+
+		if (op_ma > pdo_ma)
+			return EC_ERROR_INVAL; /* too much op current */
+		if (max_ma > pdo_ma)
+			return EC_ERROR_INVAL; /* too much max current */
+
+	}
+#endif
 	return EC_SUCCESS;
 }
 
