@@ -346,8 +346,13 @@ static inline int pd_snk_is_vbus_provided(int port)
 	// Note we simply ignore the detection of VBUS presence here
 	// since we have no circuit in place for the current HW rev
 	enum pd_states state = pd_get_state(port);
+
 	if (state == PD_STATE_SNK_DISCONNECTED)
 		return 0;
+
+    if((port==1)&&(adc_read_channel(ADC_P1_VBUS_DT)<300))
+		return 0;
+
 	return 1;
 #endif
 }

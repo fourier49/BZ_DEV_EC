@@ -528,6 +528,8 @@ void pd_check_cpower_deferred(void)
 		 {
 		 		CPRINTF("charger disconnected\n");	
 				gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+                valid_cpower_pd_src_cnt = 0;
+				valid_pd_src_pdo[0] =  PDO_FIXED(5000,  900, PDO_FIXED_FLAGS);
 				 if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
 				   CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
 				   
