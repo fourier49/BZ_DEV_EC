@@ -162,25 +162,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 	uint32_t pdo;
 	uint32_t pdo_ma;
 
-#if(0)
-	if (!idx || idx > pd_src_pdo_cnt)
-		return EC_ERROR_INVAL; /* Invalid index */
-
-	/* check current ... */
-	pdo = pd_src_pdo[idx - 1];
-	pdo_ma = (pdo & 0x3ff);
-
-	CPRINTF("Requested %d V %d mA (for %d/%d mA)\n",
-		 ((pdo >> 10) & 0x3ff) * 50, (pdo & 0x3ff) * 10,
-		 ((rdo >> 10) & 0x3ff) * 10, (rdo & 0x3ff) * 10);
-
-	if (op_ma > pdo_ma)
-		return EC_ERROR_INVAL; /* too much op current */
-	if (max_ma > pdo_ma)
-		return EC_ERROR_INVAL; /* too much max current */
-#else
-
-      if(!( pd_is_connected(1)&pd_get_cc_state(1))){
+    if(!( pd_is_connected(1)&pd_get_cc_state(1))){
       	
 		CPRINTF("[hulk]No-CPower ,Requested %d V %d mA (for %d/%d mA)\n",
 		 ((pdo >> 10) & 0x3ff) * 50, (pdo & 0x3ff) * 10,
@@ -206,7 +188,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 			return EC_ERROR_INVAL; /* too much max current */
 
 	}
-#endif
+
 	return EC_SUCCESS;
 }
 
@@ -312,14 +294,6 @@ void check_pr_role(int port, int local_pwr)
 
 void pd_pwr_local_change(int pwr_in)
 {
-    //int pr_role = 0;
-	CPRINTF("PWR DC %d 5V:%d 20V:%d chg:%d c1_con:%d cst:%d\n", pwr_in,
-	                         		     gpio_get_level(GPIO_USB_P0_PWR_5V_EN),
-						     gpio_get_level(GPIO_USB_P0_PWR_20V_EN),
-						     charger_con_status_chaged_flag,
-						     charger_pre_connect_status,
-						     charger_cur_connect_st
-			);
 	if (pwr_in) {
 		CPRINTF("SRC DC-in\n");
 		 gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
@@ -406,14 +380,31 @@ int pd_board_checks(void)
 
 int pd_check_power_swap(int port)
 {
+	int pr_role;
+	
+	pd_get_flags(port, &pr_role);
+
 	/* TODO: use battery level to decide to accept/reject power swap */
 	/*
 	 * Allow power swap as long as we are acting as a dual role device,
 	 * otherwise assume our role is fixed (not in S0 or console command
 	 * to fix our role).
 	 */
-	CPRINTF("ch_pw_swap:p%d ret:%d \n",port,(pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ? 1 : 0));
-	return pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ? 1 : 0;
+    //we won't accept change from sink->src if no c-power connected
+	if(pd_snk_is_vbus_provided(1) && pd_get_dual_role(port) == PD_DRP_TOGGLE_ON )
+	{
+		CPRINTF("C%d ch_pw_swap - accept\n",port);
+		return 1;
+	}else if(pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ){ //c-power is not connected
+		//only allow change from src->snk.
+		if(pr_role==PD_ROLE_SOURCE)
+		{
+			CPRINTF("C%d ch_pw_swap - accept\n",port);
+			return 1;
+		}
+	}
+	CPRINTF("C%d ch_pw_swap - reject\n",port);
+	return 0;
 }
 
 int pd_check_data_swap(int port, int data_role)
