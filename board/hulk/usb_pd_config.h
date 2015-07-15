@@ -367,7 +367,7 @@ void set_output_voltage(int vidx);
 void discharge_voltage(int target_vidx);
 void pd_pwr_local_change(int pwr_in);
 
-void pd_check_charger_deferred(void);
+void pd_check_cpower_deferred(void);
 int pd_handle_cpower_capbliity(int port, int cnt, uint32_t *src_caps);
 
 /* start as a sink in case we have no other power supply/battery */

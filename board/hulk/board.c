@@ -417,8 +417,8 @@ static void board_init(void)
 #endif
 
 #ifdef CONFIG_BIZ_HULK
-	ccprintf("[hook]pd_check_charger_deferred %d\n",POWER_SIGNALS_DEBOUNCE_INTERVAL);
-	hook_call_deferred(pd_check_charger_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
+	ccprintf("[hook] pd_check_cpower_deferred %d\n",POWER_SIGNALS_DEBOUNCE_INTERVAL);
+	hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
 #endif
 
 #endif
