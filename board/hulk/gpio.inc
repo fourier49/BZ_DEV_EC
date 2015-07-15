@@ -97,7 +97,7 @@ GPIO(USB_C_VBUS_DETECT,          A, 15,  GPIO_ANALOG)   /*Hulk PA15 PLUG VBUS*/
 
 /* Discarge signals */
 GPIO(UP_Discharge,     B, 11, GPIO_OUT_LOW)		/*Hulk ,port 0 discharge , high enable*/
-GPIO(VBUS_UP_CTRL1,    C, 15, GPIO_OUT_LOW)		/*Hulk ,port 0 vbus power control . keep LOW*/
+GPIO(VBUS_UP_CTRL1,    C, 15, GPIO_OUT_HIGH)	/*Hulk ,port 0 vbus power control . default high*/
 GPIO(DS_Discharge,     B, 15, GPIO_OUT_LOW)   	/*Hulk ,port 1 discharge , high enable*/
 GPIO(VBUS_DS_CTRL1,    C, 14, GPIO_OUT_LOW)   	/*Hulk ,port 1 vbus power control . default LOW*/
 

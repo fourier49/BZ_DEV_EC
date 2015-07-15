@@ -296,17 +296,19 @@ void check_pr_role(int port, int local_pwr)
 void pd_pwr_local_change(int pwr_in)
 {
 	if (pwr_in) {
-		CPRINTF("SRC DC-in\n");
-		 gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
+		  gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
+		  CPRINTF("SRC DC-in\n");
+		  gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
 	}
 	else {
 		if (gpio_get_level(GPIO_USB_P0_PWR_5V_EN)
 		||  gpio_get_level(GPIO_USB_P0_PWR_20V_EN)) {
 		
 			// No DC, thus shutdown to source power
-			CPRINTF("SRC no-DC\n");
 			gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+			CPRINTF("SRC no-DC\n");
 			set_output_voltage(PDO_IDX_OFF);
+			 gpio_set_level(GPIO_VBUS_UP_CTRL1, 1);
 		}
 	}
 	check_pr_role( 0, pwr_in );
