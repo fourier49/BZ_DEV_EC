@@ -73,6 +73,7 @@ static int last_volt_idx;
 static int charger_con_status_chaged_flag = 0;
 static int charger_pre_connect_status = 0;    //default will enter one time
 static int charger_cur_connect_st = 0;
+static int LedCnt = 0;
 
 #ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
 int pd_get_source_pdo(const uint32_t **src_pdo)
@@ -571,6 +572,27 @@ void pd_check_charger_deferred(void)
 				
 		 }
      }
+	else{ 
+		//if no changes 
+		if(charger_cur_connect_st){
+			//control LED breeze.
+			if (volt_idx == PDO_IDX_SRC_5V )
+			{
+				if((LedCnt++)%20==0)
+				{
+					//toggle
+					gpio_set_level(GPIO_LED_CONTROL, !gpio_get_level(GPIO_LED_CONTROL));
+				}
+			}else{
+				if((LedCnt++)%10==0)
+				{
+					//toggle
+					gpio_set_level(GPIO_LED_CONTROL, !gpio_get_level(GPIO_LED_CONTROL));
+				}
+			}
+		}
+
+	}
 	if(0 != hook_call_deferred(pd_check_charger_deferred, delay))
 		CPRINTF("[hook fail] call check charger \n");
 }
