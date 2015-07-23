@@ -18,12 +18,17 @@
 #include "usb_pd.h"
 #include "usb_pd_config.h"
 #include "util.h"
+#include "hooks.h"
 
 /* PD packet text tracing state : TRACE_MODE_OFF/RAW/ON */
 int trace_mode;
 
 /* The FSM is waiting for the following command (0 == None) */
 uint8_t expected_cmd;
+
+static int dp_flags;
+/* DP Status VDM as returned by UFP */
+static uint32_t dp_status;
 
 static const char * const ctrl_msg_name[] = {
 	[0]                      = "RSVD-C0",
@@ -99,6 +104,47 @@ static void print_vdo(int idx, uint32_t word)
 	} else {
 		ccprintf(" %08x", word);
 	}
+}
+
+static void hpd1_irq_deferred(void)
+{
+	gpio_set_level(GPIO_USB_P1_DP_HPD, 1);
+}
+
+DECLARE_DEFERRED(hpd1_irq_deferred);
+
+static int detect_hpd(int head, uint32_t *payload)
+{
+	int typ = PD_HEADER_TYPE(head);
+	int cmd_type = PD_VDO_CMDT(payload[0]);
+	int cur_lvl;
+	int lvl = PD_VDO_DPSTS_HPD_LVL(payload[1]);
+	int irq = PD_VDO_DPSTS_HPD_IRQ(payload[1]);
+	enum gpio_signal hpd = GPIO_USB_P1_DP_HPD;
+	cur_lvl = gpio_get_level(hpd);
+
+	if(typ != PD_DATA_VENDOR_DEF || cmd_type != CMD_DP_STATUS || cmd_type != CMD_ATTENTION)
+		return -1;
+
+	dp_status = payload[1];
+
+	/* Its initial DP status message prior to config */
+	if (!(dp_flags & DP_FLAGS_DP_ON)) {
+		if (lvl)
+			dp_flags |= DP_FLAGS_HPD_HI_PENDING;
+		return 1;
+	}
+	if (irq & cur_lvl) {
+		gpio_set_level(hpd, 0);
+		hook_call_deferred(hpd1_irq_deferred, HPD_DEBOUNCE_IRQ);
+	} else if (irq & !cur_lvl) {
+		ccprintf("ERR:HPD:IRQ&LOW\n");
+		return 0; /* nak */
+	} else {
+		gpio_set_level(hpd, lvl);
+	}
+
+	return 1;
 }
 
 static void print_packet(int head, uint32_t *payload)
@@ -239,10 +285,12 @@ void trace_packets(void)
 		STM32_COMP_CSR |= STM32_COMP_CMP2EN | STM32_COMP_CMP1EN;
 		pd_rx_enable_monitoring(0);
 		/* print the last packet content */
-		if (head > 0)
+		if (head > 0) {
+			detect_hpd(head, payload);
 			print_packet(head, payload);
-		else
+		} else {
 			print_error(head);
+		}
 		if (head > 0 && expected_cmd == PD_HEADER_TYPE(head))
 			task_wake(TASK_ID_CONSOLE);
 	}

@@ -35,6 +35,7 @@ GPIO(LED_B_L,      B, 14, GPIO_ODR_HIGH)
 GPIO(CC2_RA,       B, 15, GPIO_ODR_HIGH)
 GPIO(CC2_RP1A5,    C, 14, GPIO_ODR_HIGH)
 GPIO(CC2_RP3A0,    C, 15, GPIO_ODR_HIGH)
+GPIO(USB_P1_DP_HPD, B, 10, GPIO_INPUT)
 
 /* Unimplemented signals which we need to emulate for now */
 UNIMPLEMENTED(ENTERING_RW)
