@@ -296,7 +296,7 @@ void check_pr_role(int port, int local_pwr)
 void pd_pwr_local_change(int pwr_in)
 {
 	if (pwr_in) {
-		  gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
+		
 		  CPRINTF("SRC DC-in\n");
 		  gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
 	}
@@ -477,25 +477,37 @@ void pd_check_dr_role(int port, int dr_role, int flags)
 }
 
 static int vol_check_retry_times = 0;
+static int enable_power = 0;
 void pd_check_cpower_power_nego_done_deferred(void)
 {
 
+	int delay = 300*MSEC;
 	int mv =  adc_read_channel(ADC_P1_VBUS_DT);
      
-	CPRINTS("[%d]mv:%d\n",vol_check_retry_times,mv);
+	CPRINTS("[%d]mv:%d,enable:%d\n",vol_check_retry_times,mv,enable_power);
 	
 	  
-	//if vbus 20v is done.
-    //fixme,we should check the voltage by real requested voltage.
-	if( mv > 1000)
+	
+	if( mv > 1000)//Fixme: miss commit.
 	{
-		pd_pwr_local_change(1 );
-		
+		if(enable_power == 0)
+		{
+			delay = 10;
+			enable_power = 1;
+			gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
+			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
+				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
+			
+		}else if(enable_power == 1)
+		{
+		       enable_power = 0;
+			pd_pwr_local_change(1);
+		}
 	}else
 	{
 		if(vol_check_retry_times-- > 0)
 		{
-			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 300*MSEC))
+			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 		}
 	}
@@ -523,24 +535,22 @@ void pd_check_cpower_deferred(void)
 	     {
 	       	CPRINTF("charger connected\n");
 			vol_check_retry_times= 10;
-	        if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
-				CPRINTF("[hook fail] call check charger pwr nego done\n");
+		        if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
+					CPRINTF("[hook fail] call check charger pwr nego done\n");
 
-		 }else
-		 {
-		 		CPRINTF("charger disconnected\n");	
-				gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
-                valid_cpower_pd_src_cnt = 0;
-				valid_pd_src_pdo[0] =  PDO_FIXED(5000,  900, PDO_FIXED_FLAGS);
-				 if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
-				   CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
-				   
-				
-		 }
+			 }else
+			 {
+			 		CPRINTF("charger disconnected\n");	
+					gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+	                		valid_cpower_pd_src_cnt = 0;
+					valid_pd_src_pdo[0] =  PDO_FIXED(5000,  900, PDO_FIXED_FLAGS);
+					 if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+					   CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
+			 }
      }
 	else{ 
 		//if no changes 
-		if(cpower_cur_connect_st){
+		if(cpower_cur_connect_st&&(PD_ROLE_SOURCE==pd_get_role(0))){
 			//control LED breeze.
 			if (volt_idx == PDO_IDX_SRC_5V )
 			{
