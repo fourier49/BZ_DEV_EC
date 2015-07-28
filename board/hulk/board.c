@@ -444,9 +444,11 @@ BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
 /* I2C ports */
 const struct i2c_port_t i2c_ports[] = {
-#if 0
+#ifdef CONFIG_BIZ_HULK_V2_0
 	{"master", I2C_PORT_MASTER, 100,
 		GPIO_MASTER_I2C_SCL, GPIO_MASTER_I2C_SDA},
+#endif
+#if 0
 	{"slave",  I2C_PORT_SLAVE, 100,
 		GPIO_SLAVE_I2C_SCL, GPIO_SLAVE_I2C_SDA},
 #endif
