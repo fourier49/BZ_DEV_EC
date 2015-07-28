@@ -44,7 +44,7 @@
 
 /* USB configuration */
 #define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0x500A
+#define CONFIG_USB_PID 0xC301
 
 #ifdef CONFIG_BIZ_EMU_DOCK
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2      /* DAC_OUT2 PA5 */

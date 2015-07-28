@@ -26,10 +26,6 @@ int trace_mode;
 /* The FSM is waiting for the following command (0 == None) */
 uint8_t expected_cmd;
 
-static int dp_flags;
-/* DP Status VDM as returned by UFP */
-static uint32_t dp_status;
-
 static const char * const ctrl_msg_name[] = {
 	[0]                      = "RSVD-C0",
 	[PD_CTRL_GOOD_CRC]       = "GOODCRC",
@@ -116,24 +112,16 @@ DECLARE_DEFERRED(hpd1_irq_deferred);
 static int detect_hpd(int head, uint32_t *payload)
 {
 	int typ = PD_HEADER_TYPE(head);
-	int cmd_type = PD_VDO_CMDT(payload[0]);
+	int cmd_type = PD_VDO_CMD(payload[0]);
 	int cur_lvl;
 	int lvl = PD_VDO_DPSTS_HPD_LVL(payload[1]);
 	int irq = PD_VDO_DPSTS_HPD_IRQ(payload[1]);
 	enum gpio_signal hpd = GPIO_USB_P1_DP_HPD;
 	cur_lvl = gpio_get_level(hpd);
 
-	if(typ != PD_DATA_VENDOR_DEF || cmd_type != CMD_DP_STATUS || cmd_type != CMD_ATTENTION)
+	if(typ != PD_DATA_VENDOR_DEF || !(cmd_type == CMD_ATTENTION || cmd_type == CMD_DP_STATUS))
 		return -1;
 
-	dp_status = payload[1];
-
-	/* Its initial DP status message prior to config */
-	if (!(dp_flags & DP_FLAGS_DP_ON)) {
-		if (lvl)
-			dp_flags |= DP_FLAGS_HPD_HI_PENDING;
-		return 1;
-	}
 	if (irq & cur_lvl) {
 		gpio_set_level(hpd, 0);
 		hook_call_deferred(hpd1_irq_deferred, HPD_DEBOUNCE_IRQ);
