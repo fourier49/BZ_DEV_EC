@@ -43,8 +43,8 @@
 #define I2C_PORT_MASTER 0
 
 /* USB configuration */
-#define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0xC301
+#define CONFIG_USB_VID 0x18D1
+#define CONFIG_USB_PID 0x500A
 
 #ifdef CONFIG_BIZ_EMU_DOCK
 #define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2      /* DAC_OUT2 PA5 */
