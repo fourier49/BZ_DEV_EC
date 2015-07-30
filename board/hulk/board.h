@@ -62,10 +62,13 @@
 #define CONFIG_STM_HWTIMER32
 #undef  CONFIG_TASK_PROFILING
 #define CONFIG_USB
+#define CONFIG_USB_CONSOLE
 #define CONFIG_USB_BOS
 #undef  CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
+#define CONFIG_USB_PD_HW_DEV_ID_BOARD_MAJOR USB_PD_HW_DEV_ID_HOHO
+#define CONFIG_USB_PD_HW_DEV_ID_BOARD_MINOR 2
 #define CONFIG_USB_PD_CUSTOM_VDM
 #define CONFIG_USB_PD_DUAL_ROLE
 #define CONFIG_USB_PD_INTERNAL_COMP
@@ -141,21 +144,23 @@ enum usb_strings {
 	USB_STR_PRODUCT,
 	USB_STR_VERSION,
 	USB_STR_BB_URL,
-
+    USB_STR_CONSOLE_NAME,
 	USB_STR_COUNT
 };
 
 #endif /* !__ASSEMBLER__ */
 
 /* USB Device class */
-#define USB_DEV_CLASS USB_CLASS_BILLBOARD
+/*#define USB_DEV_CLASS USB_CLASS_BILLBOARD */
 
 /* USB interface indexes (use define rather than enum to expand them) */
-#define USB_IFACE_COUNT     0
+#define USB_IFACE_CONSOLE   0
+#define USB_IFACE_COUNT     1
 
 /* USB endpoint indexes (use define rather than enum to expand them) */
 #define USB_EP_CONTROL   0
-#define USB_EP_COUNT     1
+#define USB_EP_CONSOLE   1
+#define USB_EP_COUNT     2
 
 /* Charge current limit min / max, based on PWM duty cycle */
 #define PWM_0_MA	500
