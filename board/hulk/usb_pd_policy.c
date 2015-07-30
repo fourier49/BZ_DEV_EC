@@ -485,29 +485,26 @@ void pd_check_cpower_power_nego_done_deferred(void)
 	int mv =  adc_read_channel(ADC_P1_VBUS_DT);
      
 	CPRINTS("[%d]mv:%d,enable:%d\n",vol_check_retry_times,mv,enable_power);
-	
-	  
-	
-	if( mv > 1000)//Fixme: miss commit.
-	{
-		if(enable_power == 0)
-		{
-			delay = 10;
+
+	//Fixme: miss commit.
+	if( mv > 1000) {
+		if(enable_power == 0) {
+			delay = 50*MSEC;
 			enable_power = 1;
 			gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
 			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 			
-		}else if(enable_power == 1)
-		{
+		}
+		else 
+		if(enable_power == 1) {
 		       enable_power = 0;
 			pd_pwr_local_change(1);
 		}
-	}else
-	{
-		if(vol_check_retry_times-- > 0)
-		{
-			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
+	}
+	else{
+		if(vol_check_retry_times-- > 0){
+			if(0 != hook_call_deferred( pd_check_cpower_power_nego_done_deferred, delay))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 		}
 	}
@@ -668,7 +665,7 @@ static int dp_status(int port, uint32_t *payload)
 				   (hpd == 1),       /* HPD_HI|LOW */
 				   0,		     /* request exit DP */
 				   0,		     /* request exit USB */
-				   0,		     /* MF pref */
+				   1,		     /* MF pref */
 				   gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
 				   0,		     /* power low */
 				   0x2);

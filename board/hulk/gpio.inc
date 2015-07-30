@@ -48,6 +48,10 @@ GPIO(USB_P0_SBU_ENABLE,      B, 10, GPIO_OUT_LOW)		/*Hulk , high enable*/
 #else
 GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
 #endif
+
+
+GPIO(USB_P0_DP_SS_LANE,      B, 12, GPIO_OUT_LOW)		/*Hulk , high enable*/
+
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
 GPIO(USB_P0_PWROLE_SRC,      B, 7, GPIO_OUT_LOW)   /* Hulk , active HIGH */
 

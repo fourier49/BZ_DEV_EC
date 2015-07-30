@@ -541,6 +541,8 @@ const struct usb_port_mux usb_muxes[] = {
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
 		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
 #endif
+		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
+		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
 #endif
 	},
 #ifdef CONFIG_BIZ_EMU_HOST
