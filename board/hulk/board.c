@@ -234,7 +234,9 @@ const struct adc_t adc_channels[] = {
 	[ADC_P0_CC_PD]  = {"P0_CC_PD",  3300, 4096, 0, STM32_AIN(0)},
 	[ADC_P1_CC1_PD] = {"P1_CC1_PD", 3300, 4096, 0, STM32_AIN(2)},
 	[ADC_P1_CC2_PD] = {"P1_CC2_PD", 3300, 4096, 0, STM32_AIN(5)},
-
+	[ADC_P1_VBUS_DT] = {"P1_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(6)},
+	[ADC_P0_VBUS_DT] = {"P0_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(15)},
+	[ADC_P1_20VBUS_DT] = {"USB_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(3)},
 	/* Vbus sensing. Converted to mV, full ADC is equivalent to 25.774V. */
 	[ADC_BOOSTIN] = {"V_BOOSTIN",  25774, 4096, 0, STM32_AIN(11)},
 };
@@ -242,9 +244,11 @@ BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
 /* I2C ports */
 const struct i2c_port_t i2c_ports[] = {
-#if 0
+#ifdef CONFIG_BIZ_HULK_V2_0
 	{"master", I2C_PORT_MASTER, 100,
 		GPIO_MASTER_I2C_SCL, GPIO_MASTER_I2C_SDA},
+#endif
+#if 0
 	{"slave",  I2C_PORT_SLAVE, 100,
 		GPIO_SLAVE_I2C_SCL, GPIO_SLAVE_I2C_SDA},
 #endif
@@ -337,6 +341,8 @@ const struct usb_port_mux usb_muxes[] = {
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
 		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
 #endif
+		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
+		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
 #endif
 	},
 #ifdef CONFIG_BIZ_EMU_HOST
