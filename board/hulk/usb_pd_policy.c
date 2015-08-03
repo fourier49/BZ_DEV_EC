@@ -211,269 +211,7 @@ void pd_check_dr_role(int port, int dr_role, int flags)
 
 /* ----------------- Vendor Defined Messages ------------------ */
 
-#ifdef CONFIG_USB_PD_ALT_MODE_DFP
-//==============================================================================
-#ifdef __NEVER_USED__
-static void ___CONFIG_DFP__(void) {}
-#endif
 
-const struct svdm_response svdm_rsp = {
-	.identity = NULL,
-	.svids = NULL,
-	.modes = NULL,
-};
-
-int pd_custom_vdm(int port, int cnt, uint32_t *payload,
-		  uint32_t **rpayload)
-{
-#if 0
-	int cmd = PD_VDO_CMD(payload[0]);
-	uint16_t dev_id = 0;
-	int is_rw, is_latest;
-
-	/* make sure we have some payload */
-	if (cnt == 0)
-		return 0;
-
-	switch (cmd) {
-	case VDO_CMD_VERSION:
-		/* guarantee last byte of payload is null character */
-		*(payload + cnt - 1) = 0;
-		CPRINTF("version: %s\n", (char *)(payload+1));
-		break;
-	case VDO_CMD_READ_INFO:
-	case VDO_CMD_SEND_INFO:
-		/* copy hash */
-		if (cnt == 7) {
-			dev_id = VDO_INFO_HW_DEV_ID(payload[6]);
-			is_rw = VDO_INFO_IS_RW(payload[6]);
-			is_latest = pd_dev_store_rw_hash(port,
-							 dev_id,
-							 payload + 1,
-							 is_rw ?
-							 SYSTEM_IMAGE_RW :
-							 SYSTEM_IMAGE_RO);
-
-			/*
-			 * Send update host event unless our RW hash is
-			 * already known to be the latest update RW.
-			 */
-			if (!is_rw || !is_latest)
-				pd_send_host_event(PD_EVENT_UPDATE_DEVICE);
-
-			CPRINTF("DevId:%d.%d SW:%d RW:%d\n",
-				HW_DEV_ID_MAJ(dev_id),
-				HW_DEV_ID_MIN(dev_id),
-				VDO_INFO_SW_DBG_VER(payload[6]),
-				is_rw);
-		} else if (cnt == 6) {
-			/* really old devices don't have last byte */
-			pd_dev_store_rw_hash(port, dev_id, payload + 1,
-					     SYSTEM_IMAGE_UNKNOWN);
-		}
-		break;
-	case VDO_CMD_CURRENT:
-		CPRINTF("Current: %dmA\n", payload[1]);
-		break;
-	case VDO_CMD_FLIP:
-		board_flip_usb_mux(port);
-		break;
-	case VDO_CMD_GET_LOG:
-		pd_log_recv_vdm(port, cnt, payload);
-		break;
-	}
-#endif
-
-	return 0;
-}
-
-static int dp_flags[PD_PORT_COUNT];
-/* DP Status VDM as returned by UFP */
-static uint32_t dp_status[PD_PORT_COUNT];
-
-static void svdm_safe_dp_mode(int port)
-{
-	/* make DP interface safe until configure */
-	board_set_usb_mux(port, TYPEC_MUX_NONE, USB_SWITCH_CONNECT, 0);
-	dp_flags[port] = 0;
-	dp_status[port] = 0;
-}
-
-static int svdm_enter_dp_mode(int port, uint32_t mode_caps)
-{
-	/* Only enter mode if device is DFP_D capable */
-	if (mode_caps & MODE_DP_SNK) {
-		svdm_safe_dp_mode(port);
-		return 0;
-	}
-
-	return -1;
-}
-
-static int svdm_dp_status(int port, uint32_t *payload)
-{
-	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
-	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_STATUS | VDO_OPOS(opos));
-	payload[1] = VDO_DP_STATUS(0, /* HPD IRQ  ... not applicable */
-				   0, /* HPD level ... not applicable */
-				   0, /* exit DP? ... no */
-				   0, /* usb mode? ... no */
-				   0, /* multi-function ... no */
-				   (!!(dp_flags[port] & DP_FLAGS_DP_ON)),
-				   0, /* power low? ... no */
-				   DP_STS_CONN_DFPD);
-	return 2;
-};
-
-static int svdm_dp_config(int port, uint32_t *payload)
-{
-	int opos = pd_alt_mode(port, USB_SID_DISPLAYPORT);
-	int mf_pref = PD_VDO_DPSTS_MF_PREF(dp_status[port]);
-	int pin_mode = pd_dfp_dp_get_pin_mode(port, dp_status[port]);
-
-	if (!pin_mode)
-		return 0;
-
-	board_set_usb_mux(port, mf_pref ? TYPEC_MUX_DOCK : TYPEC_MUX_DP,
-			  USB_SWITCH_CONNECT, pd_get_polarity(port));
-
-	payload[0] = VDO(USB_SID_DISPLAYPORT, 1,
-			 CMD_DP_CONFIG | VDO_OPOS(opos));
-	payload[1] = VDO_DP_CFG(pin_mode,      /* UFP_U as UFP_D */
-				0,             /* UFP_U as DFP_D */
-				1,             /* DPv1.3 signaling */
-				2);            /* UFP_U connected as UFP_D */
-	return 2;
-};
-
-static void svdm_dp_post_config(int port)
-{
-	dp_flags[port] |= DP_FLAGS_DP_ON;
-	if (!(dp_flags[port] & DP_FLAGS_HPD_HI_PENDING))
-		return;
-
-	if (port)
-		gpio_set_level(GPIO_USB_P1_DP_HPD, 1);
-#if 0
-	else
-		gpio_set_level(GPIO_USB_P0_DP_HPD, 1);
-#endif
-}
-
-static void hpd0_irq_deferred(void)
-{
-#if 0
-	gpio_set_level(GPIO_USB_P0_DP_HPD, 1);
-#endif
-}
-
-static void hpd1_irq_deferred(void)
-{
-	gpio_set_level(GPIO_USB_P1_DP_HPD, 1);
-}
-
-DECLARE_DEFERRED(hpd0_irq_deferred);
-DECLARE_DEFERRED(hpd1_irq_deferred);
-
-#define PORT_TO_HPD_IRQ_DEFERRED(port) ((port) ? hpd1_irq_deferred : \
-					hpd0_irq_deferred)
-
-//#define PORT_TO_HPD(port) ((port) ? GPIO_USB_P1_DP_HPD : GPIO_USB_P0_DP_HPD)
-#define PORT_TO_HPD(port)    GPIO_USB_P1_DP_HPD
-
-static int svdm_dp_attention(int port, uint32_t *payload)
-{
-	int cur_lvl;
-	int lvl = PD_VDO_DPSTS_HPD_LVL(payload[1]);
-	int irq = PD_VDO_DPSTS_HPD_IRQ(payload[1]);
-	enum gpio_signal hpd = PORT_TO_HPD(port);
-	cur_lvl = gpio_get_level(hpd);
-
-	dp_status[port] = payload[1];
-
-	/* Its initial DP status message prior to config */
-	if (!(dp_flags[port] & DP_FLAGS_DP_ON)) {
-		if (lvl)
-			dp_flags[port] |= DP_FLAGS_HPD_HI_PENDING;
-		return 1;
-	}
-	if (irq & cur_lvl) {
-		gpio_set_level(hpd, 0);
-		hook_call_deferred(PORT_TO_HPD_IRQ_DEFERRED(port),
-				   HPD_DEBOUNCE_IRQ);
-	} else if (irq & !cur_lvl) {
-		CPRINTF("ERR:HPD:IRQ&LOW\n");
-		return 0; /* nak */
-	} else {
-		gpio_set_level(hpd, lvl);
-	}
-	/* ack */
-	return 1;
-}
-
-static void svdm_exit_dp_mode(int port)
-{
-	svdm_safe_dp_mode(port);
-	gpio_set_level(PORT_TO_HPD(port), 0);
-}
-
-static int svdm_enter_gfu_mode(int port, uint32_t mode_caps)
-{
-	/* Always enter GFU mode */
-	return 0;
-}
-
-static void svdm_exit_gfu_mode(int port)
-{
-}
-
-static int svdm_gfu_status(int port, uint32_t *payload)
-{
-	/*
-	 * This is called after enter mode is successful, send unstructured
-	 * VDM to read info.
-	 */
-	pd_send_vdm(port, USB_VID_GOOGLE, VDO_CMD_READ_INFO, NULL, 0);
-	return 0;
-}
-
-static int svdm_gfu_config(int port, uint32_t *payload)
-{
-	return 0;
-}
-
-static int svdm_gfu_attention(int port, uint32_t *payload)
-{
-	return 0;
-}
-
-const struct svdm_amode_fx supported_modes[] = {
-	{
-		.svid = USB_SID_DISPLAYPORT,
-		.enter = &svdm_enter_dp_mode,
-		.status = &svdm_dp_status,
-		.config = &svdm_dp_config,
-		.post_config = &svdm_dp_post_config,
-		.attention = &svdm_dp_attention,
-		.exit = &svdm_exit_dp_mode,
-	},
-	{
-		.svid = USB_VID_GOOGLE,
-		.enter = &svdm_enter_gfu_mode,
-		.status = &svdm_gfu_status,
-		.config = &svdm_gfu_config,
-		.attention = &svdm_gfu_attention,
-		.exit = &svdm_exit_gfu_mode,
-	}
-};
-const int supported_modes_cnt = ARRAY_SIZE(supported_modes);
-
-#else  // CONFIG_USB_PD_ALT_MODE_DFP
-//==============================================================================
-#ifdef __NEVER_USED__
-static void ___CONFIG_UFP__(void) {}
-#endif
 
 const uint32_t vdo_idh = VDO_IDH(0, /* data caps as USB host */
 				 1, /* data caps as USB device */
@@ -561,12 +299,10 @@ static int dp_status(int port, uint32_t *payload)
 	return 2;
 }
 
-extern void hpd_irq_deferred(void);
-extern void hpd_lvl_deferred(void);
+
 static void dp_switch_4L_2L(void)
 {
-	// enable DP AUX
-	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+	enum hpd_event ev;
 
 #ifndef CONFIG_BIZ_HULK
 	// send RESET pulse to external peripherals
@@ -576,11 +312,8 @@ static void dp_switch_4L_2L(void)
 	usleep(300);
 	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
 #endif
-	usleep(300);
-	hpd_irq_deferred();
-
-	usleep(300);
-	hpd_lvl_deferred();
+	ev = (gpio_get_level(GPIO_USB_P0_DP_HPD)) ? hpd_high : hpd_low;
+	pd_send_hpd(0, ev);
 }
 DECLARE_DEFERRED(dp_switch_4L_2L);
 
@@ -595,6 +328,9 @@ static int dp_config(int port, uint32_t *payload)
 #endif
 		return 1;
 	}
+	// enable DP AUX
+	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
+
 #ifndef CONFIG_BIZ_HULK
 	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
 
@@ -609,7 +345,7 @@ static int dp_config(int port, uint32_t *payload)
 	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_D)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
 #endif
-	hook_call_deferred(dp_switch_4L_2L, 20 * MSEC);
+	hook_call_deferred(dp_switch_4L_2L, 50 * MSEC);
 	return 1;
 }
 
@@ -711,6 +447,5 @@ int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 	return rsize;
 }
 
-#endif // CONFIG_USB_PD_ALT_MODE_DFP
 
 //==============================================================================
