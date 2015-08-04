@@ -8,12 +8,9 @@
 //-------------------------------------------------------------------------------------
 // ALL GPIOs with interrupt handlers must be declared at the top of the gpio.inc
 //-------------------------------------------------------------------------------------
-#ifndef CONFIG_BIZ_EMU_HOST
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
 GPIO_INT(USB_P0_DP_HPD,          B, 5,  GPIO_INT_BOTH, hpd_event) /*Hulk , high means plug-in*/
 #endif
-#endif
-
 
 
 //-------------------------------------------------------------------------------------
@@ -35,10 +32,17 @@ GPIO(USB_CCRX_REF_OUT,       A, 4,  GPIO_ANALOG)
 GPIO(USB_P1_CC1_PD,          A, 2,  GPIO_ANALOG)    /*Hulk PA2 Port1(Receptable) CC1 PD*/
 GPIO(USB_P1_CC2_PD,          A, 5,  GPIO_ANALOG)    /*Hulk PA5 Port1(Receptable) CC2 PD*/
 GPIO(USB_P1_CC_TX_DATA,      B, 14, GPIO_OUT_LOW)    /*Hulk PB14 Port1(Receptable) TX data*/
-GPIO(USB_P1_CC_TX_EN,        A, 7,  GPIO_OUT_LOW)    /*Hulk PA7  Port1(Receptable) TX data enable*/
 
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+GPIO(USB_P1_CC_TX_EN,        B, 10,  GPIO_OUT_LOW)    /*Hulk PA7  Port1(Receptable) TX data enable*/
+/* USB CC1/CC2 Polarity (orientation) */
+GPIO(USB_P1_CC_POLARITY,     B, 12,  GPIO_OUT_LOW)   /*Hulk PA8  Port1(Receptable) orientation ,L:CC1 on ,H:CC2 on */
+#else
+GPIO(USB_P1_CC_TX_EN,        A, 7,  GPIO_OUT_LOW)    /*Hulk PA7  Port1(Receptable) TX data enable*/
 /* USB CC1/CC2 Polarity (orientation) */
 GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW)   /*Hulk PA8  Port1(Receptable) orientation ,L:CC1 on ,H:CC2 on */
+#endif
+
 #endif
 
 //-------------------------------------------------------------------------------------
@@ -47,13 +51,30 @@ GPIO(USB_P1_CC_POLARITY,     A, 8,  GPIO_OUT_LOW)   /*Hulk PA8  Port1(Receptable
 /* USB/DP mux signals */
 #ifndef CONFIG_BIZ_EMU_HOST
 #ifdef CONFIG_BIZ_HULK_V2_0
-GPIO(USB_P0_SBU_ENABLE,      B, 10, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
+	GPIO(USB_P0_SBU_ENABLE,      B, 10, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+	/*Not used this pin,use PA7 to replace,PA7 is not used*/
+	GPIO(USB_P0_SBU_ENABLE,      A, 7, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+	GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+	GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#endif
 #else
 GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
 #endif
 
-
-GPIO(USB_P0_DP_SS_LANE,      B, 12, GPIO_OUT_LOW)		/*Hulk , this pin is not connected*/
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
+	GPIO(USB_P0_DP_SS_LANE,      B, 12, GPIO_OUT_LOW)		/*Hulk , this pin is not connected*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+	/*Not used this pin,use PA7 to replace,PA7 is not used*/
+	GPIO(USB_P0_SBU_ENABLE,      A, 7, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+	GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+	GPIO(USB_P0_SBU_ENABLE,      B, 9, GPIO_OUT_LOW)		/*Hulk , high enable*/
+#endif
 
 /* Host/Device mode handling (presentation of Rp or Rd by switch) */
 GPIO(USB_P0_PWROLE_SRC,      B, 7, GPIO_OUT_LOW)   /* Hulk , active HIGH */

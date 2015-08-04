@@ -547,7 +547,19 @@ const uint32_t vdo_ama = VDO_AMA(CONFIG_USB_PD_IDENTITY_HW_VERS,
 				 0, /* Vconn power */
 				 0, /* Vconn power required */
 				 1, /* Vbus power required */
-				 AMA_USBSS_BBONLY /* USB SS support */);
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
+				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+#else
+				 AMA_USBSS_BBONLY /* USB SS support */
+#endif
+
+				);
 
 /* Holds valid object position (opos) for entered mode */
 static int alt_mode[PD_AMODE_COUNT];
@@ -576,8 +588,20 @@ static int svdm_response_svids(int port, uint32_t *payload)
 
 const uint32_t vdo_dp_modes[MODE_CNT] =  {
 	VDO_MODE_DP(0,		   /* UFP pin cfg supported : none */
-		    MODE_DP_PIN_C  /* DFP pin cfg supported */
-		  | MODE_DP_PIN_D,
+
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+				MODE_DP_PIN_D , /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
+				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+#else
+				 MODE_DP_PIN_C  /* DFP pin cfg supported */
+		  		| MODE_DP_PIN_D,
+#endif
+
 		    0,		   /* with usb2.0 signalling in AMode */
 		    CABLE_PLUG,	   /* its a plug */
 		    MODE_DP_V13,   /* DPv1.3 Support, no Gen2 */
@@ -612,7 +636,7 @@ static int dp_status(int port, uint32_t *payload)
 				   (hpd == 1),       /* HPD_HI|LOW */
 				   0,		     /* request exit DP */
 				   0,		     /* request exit USB */
-				   0,		     /* MF pref */
+				   1,		     /* MF pref */
 				   gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
 				   0,		     /* power low */
 				   0x2);

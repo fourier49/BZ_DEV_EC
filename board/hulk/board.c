@@ -461,7 +461,7 @@ static struct my_bos bos_desc = {
 	},
 	.bb_caps_svids = {
 		{
-			.wSVID = 0xff01, /* TODO(tbroch) def'd in other CL remove hardcode */
+			.wSVID = USB_SID_DISPLAYPORT,
 			.bAlternateMode = 1,
 			.iAlternateModeString = USB_STR_BB_URL, /* TODO(crosbug.com/p/32687) */
 		},
@@ -484,12 +484,8 @@ struct usb_port_mux
 const struct usb_port_mux usb_muxes[] = {
 	{
 #ifndef CONFIG_BIZ_EMU_HOST
-#ifndef CONFIG_BIZ_HULK
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
-#endif
-		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
+		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE, /*in gpio.inc , define as no-used pin*/
 #endif
 	},
 #ifdef CONFIG_BIZ_EMU_HOST
