@@ -211,6 +211,7 @@ static inline void pd_set_host_mode(int port, int enable)
 {
 	if (port == 0) {
 		if (enable) {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 1);
 			/* We never charging in power source mode */
 //			gpio_set_level(GPIO_USB_P0_CHARGE_EN_L, 1);
 
@@ -218,8 +219,10 @@ static inline void pd_set_host_mode(int port, int enable)
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 1);
 //			gpio_set_level(GPIO_USB_P0_CC2_ODL, 1);
 		} else {
+			gpio_set_level(GPIO_USB_P0_PWROLE_SRC, 0);
 			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P0_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+			gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
 
 			/* Pull low for device mode. */
 //			gpio_set_level(GPIO_USB_P0_CC1_ODL, 0);
@@ -227,25 +230,6 @@ static inline void pd_set_host_mode(int port, int enable)
 
 			/* Let charge_manager decide to enable the port */
 		}
-#ifdef CONFIG_BIZ_DUAL_CC
-	} else {
-		if (enable) {
-			/* We never charging in power source mode */
-//			gpio_set_level(GPIO_USB_P1_CHARGE_EN_L, 1);
-
-			/* High-Z is used for host mode. */
-//			gpio_set_level(GPIO_USB_P1_CC1_ODL, 1);
-//			gpio_set_level(GPIO_USB_P1_CC2_ODL, 1);
-		} else {
-			/* Kill VBUS power supply */
-//			gpio_set_level(GPIO_USB_P1_5V_EN, 0);
-
-			/* Pull low for device mode. */
-//			gpio_set_level(GPIO_USB_P1_CC1_ODL, 0);
-//			gpio_set_level(GPIO_USB_P1_CC2_ODL, 0);
-			/* Let charge_manager decide to enable the port */
-		}
-#endif
 	}
 }
 
@@ -312,22 +296,36 @@ static inline void pd_set_vconn(int port, int polarity, int enable)
 
 static inline int pd_snk_is_vbus_provided(int port)
 {
-#ifdef __BIZ_EMU_BUILD__
+	
+	enum pd_states state = pd_get_state(port);
+
+	if (state == PD_STATE_SNK_DISCONNECTED)
+		return 0;
+
+    if((port==1)&&(adc_read_channel(ADC_P1_VBUS_DT)<300))
+		return 0;
+
+	//FIXME: for port 0, we should add check  with ADC
 	return 1;
-#else
-//#ifdef CONFIG_BIZ_DUAL_CC
-#if defined(CONFIG_BIZ_DUAL_CC) && !defined(CONFIG_BIZ_HULK)
-	return gpio_get_level(port ? GPIO_USB_P1_VBUS_WAKE :
-				     GPIO_USB_P0_VBUS_WAKE);
-#else
-	/*
-	if (port == 0)
-		return gpio_get_level(GPIO_USB_P0_VBUS_WAKE);
-	*/
-	return 1;
-#endif
-#endif
 }
+
+
+
+/* Voltage indexes for the PDOs */
+enum volt_idx {
+	PDO_IDX_SRC_5V  = 0,
+	PDO_IDX_SRC_20V = 1,
+	PDO_IDX_COUNT,
+	PDO_IDX_SNK_VBUS,
+	PDO_IDX_OFF,
+};
+
+void set_output_voltage(int vidx);
+void discharge_voltage(int target_vidx);
+void pd_pwr_local_change(int pwr_in);
+
+void pd_check_cpower_deferred(void);
+
 
 /* start as a sink in case we have no other power supply/battery */
 #ifdef CONFIG_BIZ_EMU_HOST

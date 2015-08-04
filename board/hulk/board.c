@@ -21,8 +21,8 @@
 #include "timer.h"
 #include "util.h"
 
-#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC)
-#define POWER_SIGNALS_DEBOUNCE2_INTERVAL (500*MSEC)
+/*start time for hook to check c-power*/
+#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC) 
 
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
@@ -269,20 +269,14 @@ void vbus0_evt(enum gpio_signal signal)
 	task_wake(TASK_ID_PD_P0);
 }
 
-//#ifdef CONFIG_BIZ_DUAL_CC
-//#if defined(CONFIG_BIZ_DUAL_CC) && !defined(CONFIG_BIZ_HULK)
+#ifdef CONFIG_BIZ_DUAL_CC
+/*For hulk , vbus1 isr event is not used due to hw limitation*/
 void vbus1_evt(enum gpio_signal signal)
 {
 	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
 	task_wake(TASK_ID_PD_P1);
 }
-//#endif
-
-void pwr_in_event(enum gpio_signal signal)
-{
-	ccprintf("DC-IN %d, %d!\n", signal, gpio_get_level(signal));
-	// task_wake(TASK_ID_PD_P1);
-}
+#endif
 
 // must be after GPIO's signal definition
 #include "gpio_list.h"

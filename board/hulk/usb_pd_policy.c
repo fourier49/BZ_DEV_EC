@@ -25,10 +25,6 @@
 
 
 //==============================================================================
-/* Define typical operating power and max power */
-#define OPERATING_POWER_MW 15000
-#define MAX_POWER_MW       60000
-#define MAX_CURRENT_MA     3000
 
 /*
  * Do not request any voltage within this deadband region, where
@@ -37,8 +33,8 @@
 #define INPUT_VOLTAGE_DEADBAND_MIN 9700
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_SUSPEND | PDO_FIXED_COMM_CAP)
-//#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_DATA_SWAP)
+#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
+
 
 const uint32_t pd_src_pdo[] = {
 		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
@@ -50,6 +46,17 @@ const uint32_t pd_snk_pdo[] = {
 		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+/* current and previous selected PDO entry */
+static int volt_idx;
+static int last_volt_idx;
+
+/*charger conntected status flag used to decide if plug/unplug happen */
+static int cpower_con_status_chaged_flag = 0;
+static int cpower_pre_connect_status = 0;    //default will enter one time
+static int cpower_cur_connect_st = 0;
+
+
 
 int pd_is_valid_input_voltage(int mv)
 {
@@ -85,37 +92,132 @@ int pd_check_requested_voltage(uint32_t rdo)
 	return EC_SUCCESS;
 }
 
+
+void set_output_voltage(int vidx)
+{
+	gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+	gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 0);
+
+	if (vidx == PDO_IDX_SRC_5V) {
+		gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+		CPRINTF("SRC 5V\n");
+	}
+	else
+	if (vidx == PDO_IDX_SRC_20V) {
+		gpio_set_level(GPIO_USB_P0_PWR_20V_EN, 1);
+		CPRINTF("SRC 20V\n");
+	}
+	else
+	if (vidx == PDO_IDX_SNK_VBUS) {
+		CPRINTF("SNK VBUS %d\n");
+	}
+	else
+		CPRINTF("no PWR\n");
+}
+
+void discharge_voltage(int target_vidx)
+{
+	// gpio_set_level(GPIO_USB_P0_PWR_DISCHARGE, 1);
+}
+
 void pd_transition_voltage(int idx)
 {
-	/* No-operation: we are always 5V */
+	last_volt_idx = volt_idx;
+	volt_idx = idx - 1;
+	CPRINTF("Xsit Vol: %d %d\n", last_volt_idx, volt_idx);
+	if (volt_idx < last_volt_idx) { /* down voltage transition */
+#if 0
+		/* Stop OCP monitoring */
+		adc_disable_watchdog();
+
+		discharge_volt_idx = volt_idx;
+		/* from 20V : do an intermediate step at 12V */
+		if (volt_idx == PDO_IDX_SRC_5V && last_volt_idx == PDO_IDX_SRC_20V)
+			volt_idx = PDO_IDX_12V;
+		discharge_voltage(voltages[volt_idx].ovp);
+#else
+		discharge_voltage(PDO_IDX_SRC_5V);//do nothing
+		set_output_voltage(PDO_IDX_SRC_5V);
+#endif
+	} else if (volt_idx > last_volt_idx) { /* up voltage transition */
+#if 0
+		if (discharge_is_enabled()) {
+			/* Make sure discharging is disabled */
+			discharge_disable();
+			/* Enable over-current monitoring */
+			adc_enable_watchdog(ADC_CH_A_SENSE,
+					    MAX_CURRENT_FAST, 0);
+		}
+#else
+		set_output_voltage(PDO_IDX_SRC_20V);
+#endif
+	}
 }
+
+void check_pr_role(int port, int local_pwr)
+{
+	int pr_role;
+	int flags = pd_get_flags(port, &pr_role);
+	int partner_extpower = flags & PD_FLAGS_PARTNER_EXTPOWER;
+    
+	if (local_pwr) {
+		// with local power, but only up-charging to a unpowered Host
+		if (!partner_extpower && pr_role == PD_ROLE_SINK) {
+			CPRINTF("PRSW: SNK->SRC\n");
+			pd_request_power_swap(port);
+		}
+	}
+	else {
+		// w/o local power, but request power from the Host
+		if (pr_role == PD_ROLE_SOURCE) {
+			CPRINTF("PRSW: SRC->SNK\n");
+			pd_request_power_swap(port);
+		}
+	}
+}
+
+void pd_pwr_local_change(int pwr_in)
+{
+	if (pwr_in) {
+		  CPRINTF("SRC DC-in\n");
+		  gpio_set_level(GPIO_VBUS_DS_CTRL1, 1);
+	}
+	else {
+		if (gpio_get_level(GPIO_USB_P0_PWR_5V_EN)
+		||  gpio_get_level(GPIO_USB_P0_PWR_20V_EN)) {
+		
+			// No DC, thus shutdown to source power
+			gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+			CPRINTF("SRC no-DC\n");
+			set_output_voltage(PDO_IDX_OFF);
+			gpio_set_level(GPIO_VBUS_UP_CTRL1, 1);
+		}
+	}
+	check_pr_role( 0, pwr_in );
+}
+
 
 int pd_set_power_supply_ready(int port)
 {
-	/* provide VBUS */
-#ifdef CONFIG_BIZ_EMU_HOST
-	if (port == 1)  gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 1);
-#else
-	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
-#endif
-
+	if(volt_idx== PDO_IDX_SRC_5V) {
+		/* provide VBUS */
+		if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 1);
+	}
 	/* notify host of power info change */
-//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
-
+	//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
+	CPRINTF("setpw_ready p:%d volt:%d\n",port,volt_idx);
 	return EC_SUCCESS; /* we are ready */
 }
 
 void pd_power_supply_reset(int port)
 {
-	/* Kill VBUS */
-#ifdef CONFIG_BIZ_EMU_HOST
-	if (port == 1)  gpio_set_level(GPIO_USB_P1_PWR_5V_EN, 0);
-#else
-	if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
-#endif
-
+	if(volt_idx== PDO_IDX_SRC_5V){
+		/* Kill VBUS */
+		if (port == 0)  gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
+	 }
 	/* notify host of power info change */
-//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
+	//	pd_send_host_event(PD_EVENT_POWER_CHANGE);
+	CPRINTF("setpw_reset p:%d\n",port);
 }
 
 void pd_set_input_current_limit(int port, uint32_t max_ma,
@@ -185,6 +287,10 @@ void pd_execute_data_swap(int port, int data_role)
 
 void pd_check_pr_role(int port, int pr_role, int flags)
 {
+#if 0 
+// TODO: we temporarily disable this checking for auto PR-SWAP
+//       instead, use console command for the moment. Will need to get it AUTO later...
+
 	/*
 	 * If partner is dual-role power and dualrole toggling is on, consider
 	 * if a power swap is necessary.
@@ -201,6 +307,8 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 		     (partner_extpower && pr_role == PD_ROLE_SOURCE))
 			pd_request_power_swap(port);
 	}
+#endif
+	CPRINTF("pd_check_pr_role:%d\n",port);
 }
 
 void pd_check_dr_role(int port, int dr_role, int flags)
@@ -209,6 +317,71 @@ void pd_check_dr_role(int port, int dr_role, int flags)
 	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
 		pd_request_data_swap(port);
 }
+
+static int vol_check_retry_times = 0;
+static int enable_power = 0;
+void pd_check_cpower_power_nego_done_deferred(void)
+{
+	int delay = 300*MSEC;
+	int mv =  adc_read_channel(ADC_P1_VBUS_DT);
+     
+	CPRINTS("[%d]mv:%d,enable:%d\n",vol_check_retry_times,mv,enable_power);
+
+	//Fixme: use real target voltage
+	if( mv > 1000) {
+		if(enable_power == 0) {
+			delay = 50*MSEC;
+			enable_power = 1;
+			gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
+			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
+				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
+		}
+		else 
+		if(enable_power == 1) {
+		       enable_power = 0;
+			pd_pwr_local_change(1);
+		}
+	}
+	else{
+		if(vol_check_retry_times-- > 0){
+			if(0 != hook_call_deferred( pd_check_cpower_power_nego_done_deferred, delay))
+				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
+		}
+	}
+	
+}
+DECLARE_DEFERRED(pd_check_cpower_power_nego_done_deferred);
+
+//static int vsafe_check_retry_times = 0;
+void pd_cpower_unplung_deferred(void)
+{
+	pd_pwr_local_change(0);
+}
+DECLARE_DEFERRED(pd_cpower_unplung_deferred);
+                      
+void pd_check_cpower_deferred(void)
+{
+	uint32_t delay = 100*MSEC;
+	cpower_cur_connect_st =  pd_snk_is_vbus_provided(1);
+	cpower_con_status_chaged_flag = cpower_pre_connect_status^cpower_cur_connect_st;
+	cpower_pre_connect_status = cpower_cur_connect_st ;
+	if( cpower_con_status_chaged_flag )	{
+		 if(cpower_cur_connect_st){
+				CPRINTF("charger connected\n");
+				vol_check_retry_times= 10;
+				if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
+					CPRINTF("[hook fail] call check charger pwr nego done\n");
+			}else{
+				CPRINTF("charger disconnected\n");	
+				gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+				if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+					CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
+			}
+	}
+	if(0 != hook_call_deferred(pd_check_cpower_deferred, delay))
+		CPRINTF("[hook fail] call check charger \n");
+}
+DECLARE_DEFERRED(pd_check_cpower_deferred);
 
 /* ----------------- Vendor Defined Messages ------------------ */
 
