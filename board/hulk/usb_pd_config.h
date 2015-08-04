@@ -367,8 +367,11 @@ void pd_check_cpower_deferred(void);
 #define PD_POWER_SUPPLY_TURN_OFF_DELAY 250000 /* us */
 
 /* Define typical operating power and max power */
-#define PD_OPERATING_POWER_MW 15000
-#define PD_MAX_POWER_MW       60000
+#define PD_OPERATING_POWER_MW 1000
+//this value is used to calculated the real wanted current.
+//in pd_build_requet() and pd_process_source_cap().
+//calculated the needed current and send request to power src.
+#define PD_MAX_POWER_MW       60000 
 #define PD_MAX_CURRENT_MA     3000
 #define PD_MAX_VOLTAGE_MV     20000
 

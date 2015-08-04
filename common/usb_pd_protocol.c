@@ -690,11 +690,19 @@ static int send_source_cap(int port)
 static void send_sink_cap(int port)
 {
 	int bit_len;
-	uint16_t header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
-			pd[port].data_role, pd[port].msg_id, pd_snk_pdo_cnt);
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+	const uint32_t *snk_pdo;
+	const int snk_pdo_cnt = pd_get_snk_pdo(port,&snk_pdo);
+#else
+	const uint32_t *snk_pdo = pd_snk_pdo;
+	const int snk_pdo_cnt = pd_snk_pdo_cnt;
+#endif
 
-	bit_len = send_validate_message(port, header, pd_snk_pdo_cnt,
-					pd_snk_pdo);
+	uint16_t header = PD_HEADER(PD_DATA_SINK_CAP, pd[port].power_role,
+			pd[port].data_role, pd[port].msg_id, snk_pdo_cnt);
+
+	bit_len = send_validate_message(port, header, snk_pdo_cnt,
+					snk_pdo);
 	if (debug_level >= 1)
 		CPRINTF("snkCAP>%d\n", bit_len);
 }

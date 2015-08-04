@@ -77,6 +77,7 @@
 #define CONFIG_USBC_SS_MUX
 #define CONFIG_USBC_VCONN
 #undef  CONFIG_WATCHDOG_HELP
+#define CONFIG_USB_PD_DYNAMIC_SRC_CAP
 
 /*
  * DFP advised power (Type-C spec: Table 4-18 ~ 4-20)

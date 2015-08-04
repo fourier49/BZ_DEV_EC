@@ -33,19 +33,40 @@
 #define INPUT_VOLTAGE_DEADBAND_MIN 9700
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
+//Default is definition for no cpower connected.
+#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_COMM_CAP)
 
 
 const uint32_t pd_src_pdo[] = {
-		PDO_FIXED(5000,  1500, PDO_FIXED_FLAGS),
-		PDO_FIXED(20000, 3000, PDO_FIXED_FLAGS),
+		PDO_FIXED(5000,  900, PDO_FIXED_FLAGS),
 };
 const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+
+#define CPOWER_PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE| PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
+
+uint32_t cpower_pd_src_cnt = 0;
+uint32_t cpower_pd_src_pdo[5] = {
+	PDO_FIXED(5000,  900, CPOWER_PDO_FIXED_FLAGS),
+	PDO_FIXED(5000,  900, CPOWER_PDO_FIXED_FLAGS),
+	PDO_FIXED(5000,  900, CPOWER_PDO_FIXED_FLAGS),
+	PDO_FIXED(5000,  900, CPOWER_PDO_FIXED_FLAGS),
+	PDO_FIXED(5000,  900, CPOWER_PDO_FIXED_FLAGS),
+};
+#endif
+
 const uint32_t pd_snk_pdo[] = {
-		PDO_FIXED(5000, 1500, PDO_FIXED_FLAGS),
+	PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
+
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+const uint32_t cpower_pd_snk_pdo[] = {
+	PDO_FIXED(5000, 1500, CPOWER_PDO_FIXED_FLAGS),
+};
+const int cpower_pd_snk_pdo_cnt = ARRAY_SIZE(cpower_pd_snk_pdo);
+#endif
 
 /* current and previous selected PDO entry */
 static int volt_idx;
@@ -57,7 +78,81 @@ static int cpower_pre_connect_status = 0;    //default will enter one time
 static int cpower_cur_connect_st = 0;
 static int LedCnt = 0;
 
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+int pd_get_source_pdo(const uint32_t **src_pdo)
+{
+	int cnt = 0;
+	if(pd_is_connected(1) == 0){ 
+		*src_pdo = pd_src_pdo;
+		cnt = pd_src_pdo_cnt;
+		CPRINTF("get_src_pdo,-cpower cnt:%d\n",cnt);
+	}else{ //if port 1 is connected and power nego is done
+		*src_pdo = cpower_pd_src_pdo;
+		cnt = cpower_pd_src_cnt;
+		CPRINTF("get_src_pdo,+cpower cnt:%d\n",cnt);
+	}
+	return cnt;
+}
 
+int pd_get_snk_pdo(int port , const uint32_t **snk_pdo)
+{
+	int cnt = 0;
+	if((pd_is_connected(1) == 0)||(port==1)){ 
+		*snk_pdo = pd_snk_pdo;
+		cnt = pd_snk_pdo_cnt;
+		CPRINTF("get_snk_pdo,-cpower cnt:%d\n",cnt);
+	}else{ //if port 1 is connected and power nego is done
+		*snk_pdo = cpower_pd_snk_pdo;
+		cnt = cpower_pd_snk_pdo_cnt;
+		CPRINTF("get_snk_pdo,+cpower cnt:%d\n",cnt);
+	}
+	return cnt;
+}
+
+int pd_handle_cpower_capability(int port, int cnt, uint32_t *src_caps)
+{
+	int i = 0;
+	int numa = 0;
+	uint32_t ma, mv;
+	uint32_t uw = 0;
+	uint32_t pdo = 0;
+	int max_ma;
+	int max_uw = 0;
+
+	if(port == 0 )//when receive src cap from port-0,we don't need to save and process it.
+		return 0;
+
+	cpower_pd_src_cnt = 1;//at least 1
+	for (i = 0; i < cnt; i++) {
+		pdo= *(src_caps+i);		 
+		mv = ((pdo >> 10) & 0x3FF) * 50;//unit is 50 mv
+		if ((pdo & PDO_TYPE_MASK) == PDO_TYPE_BATTERY) {
+			uw = 250000 * (pdo & 0x3FF);
+			max_ma = 1000 * MIN(1000 * uw, PD_MAX_POWER_MW) / mv;
+		} else {
+			max_ma = 10 * (pdo & 0x3FF); //unit is 10 ma
+			max_ma = MIN(max_ma, PD_MAX_POWER_MW * 1000 / mv);
+		}
+		ma = MIN(max_ma, PD_MAX_CURRENT_MA);
+		CPRINTF("ma:%d max-ma%d \n", (10 * (pdo & 0x3FF)),max_ma);
+		uw = ma*mv;
+
+		if(uw > (PD_MAX_POWER_MW *1000))
+			uw -= (PD_MAX_POWER_MW *1000);
+
+		if(max_uw  <  uw) {
+			max_uw = uw;
+			numa = uw/mv;
+			cpower_pd_src_pdo[1] = PDO_FIXED(mv,numa, PDO_FIXED_FLAGS);
+			CPRINTF("adapter_cap idx:%d mv:%d uw:%d new-ma%d \n", i, mv,uw,numa);
+		}
+	}
+	if(cnt > 1)//if receive src pdo.
+		cpower_pd_src_cnt = 2;
+
+	return cpower_pd_src_cnt;
+}
+#endif
 
 int pd_is_valid_input_voltage(int mv)
 {
@@ -74,7 +169,23 @@ int pd_check_requested_voltage(uint32_t rdo)
 	uint32_t pdo;
 	uint32_t pdo_ma;
 
-	if (!idx || idx > pd_src_pdo_cnt)
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+	const uint32_t *src_pdo;
+	const int src_pdo_cnt = pd_get_source_pdo(&src_pdo);
+#else
+	const uint32_t *src_pdo = pd_src_pdo;
+	const int src_pdo_cnt = pd_src_pdo_cnt;
+#endif
+
+	if(pd_snk_is_vbus_provided(1) == 0) {
+		//this case means when c-power is removed and 
+		//before completing the pr-swap from src->snk
+		//we have receive request voltage.
+		if(idx != 1)
+			return EC_ERROR_INVAL; /* Invalid index */
+	}
+
+	if (!idx || idx > src_pdo_cnt)
 		return EC_ERROR_INVAL; /* Invalid index */
 
 	/* check current ... */
@@ -256,13 +367,28 @@ int pd_board_checks(void)
 
 int pd_check_power_swap(int port)
 {
+	int pr_role;
+	
+	pd_get_flags(port, &pr_role);
+
 	/* TODO: use battery level to decide to accept/reject power swap */
 	/*
 	 * Allow power swap as long as we are acting as a dual role device,
 	 * otherwise assume our role is fixed (not in S0 or console command
 	 * to fix our role).
 	 */
-	return pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ? 1 : 0;
+
+	//we won't accept change from sink->src if no c-power connected
+	if((pd_snk_is_vbus_provided(1) == 1) && (pd_get_dual_role(port) == PD_DRP_TOGGLE_ON)){
+		CPRINTF("C%d ch_pw_swap - accept\n",port);
+		return 1;
+	}else if((pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ) && (pr_role==PD_ROLE_SOURCE)) { //c-power is not connected
+		//only allow change from src->snk.
+		CPRINTF("C%d ch_pw_swap - accept\n",port);
+		return 1;
+	}
+	CPRINTF("C%d ch_pw_swap - reject\n",port);
+	return 0;
 }
 
 int pd_check_data_swap(int port, int data_role)
@@ -296,6 +422,7 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 	 * if a power swap is necessary.
 	 */
 	if ((flags & PD_FLAGS_PARTNER_DR_POWER) &&
+
 		pd_get_dual_role(port) == PD_DRP_TOGGLE_ON) {
 		/*
 		 * If we are a sink and partner is not externally powered, then
@@ -338,7 +465,7 @@ void pd_check_cpower_power_nego_done_deferred(void)
 		}
 		else 
 		if(enable_power == 1) {
-		       enable_power = 0;
+			enable_power = 0;
 			pd_pwr_local_change(1);
 		}
 	}
@@ -347,9 +474,9 @@ void pd_check_cpower_power_nego_done_deferred(void)
 			if(0 != hook_call_deferred( pd_check_cpower_power_nego_done_deferred, delay))
 				CPRINTF("[hook fail] call check charger pwr nego done -r\n");
 		}
-	}
-	
+	}	
 }
+
 DECLARE_DEFERRED(pd_check_cpower_power_nego_done_deferred);
 
 //static int vsafe_check_retry_times = 0;
@@ -366,17 +493,21 @@ void pd_check_cpower_deferred(void)
 	cpower_con_status_chaged_flag = cpower_pre_connect_status^cpower_cur_connect_st;
 	cpower_pre_connect_status = cpower_cur_connect_st ;
 	if( cpower_con_status_chaged_flag )	{
-		 if(cpower_cur_connect_st){
-				CPRINTF("charger connected\n");
-				vol_check_retry_times= 10;
-				if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
-					CPRINTF("[hook fail] call check charger pwr nego done\n");
-			}else{
-				CPRINTF("charger disconnected\n");	
-				gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
-				if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
-					CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
-			}
+		if(cpower_cur_connect_st){
+			CPRINTF("charger connected\n");
+			vol_check_retry_times= 10;
+			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
+				CPRINTF("[hook fail] call check charger pwr nego done\n");
+		}else{
+			CPRINTF("charger disconnected\n");
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP	
+			cpower_pd_src_cnt = 0;
+			cpower_pd_src_pdo[0] = PDO_FIXED(5000,900,PDO_FIXED_FLAGS);
+#endif				
+			gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+			if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+				CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
+		}
 	}
 	else{
 		if(PD_ROLE_SOURCE == pd_get_role(0)){

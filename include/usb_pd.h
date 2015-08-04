@@ -1147,7 +1147,11 @@ extern const int pd_snk_pdo_cnt;
  * @param src_pdo pointer to the data to return.
  * @return number of PDOs returned.
  */
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
 int pd_get_source_pdo(const uint32_t **src_pdo);
+int pd_get_snk_pdo(int port , const uint32_t **snk_pdo);
+int pd_handle_cpower_capability(int port, int cnt, uint32_t *src_caps);
+#endif
 
 /* Muxing for the USB type C */
 enum typec_mux {
