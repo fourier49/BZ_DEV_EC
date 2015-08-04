@@ -1974,6 +1974,18 @@ void pd_task(void)
 	charge_manager_update_dualrole(port, CAP_UNKNOWN);
 #endif
 
+      //Fixme: find the root cause the 2 ports connected at the same time will cause communication fail.
+	CPRINTS("++C:%d start- p0-adc:%d\n",port,pd_adc_read(0 , 0));
+	if(port == 1) //task 1 running
+	{
+		if(pd_adc_read(0 , 0) > 400) //if  p0 is connected
+		{
+			msleep(400); //suppose the pd communication is finished in 400ms.
+		}
+	}
+       CPRINTS("--C:%d start- p0-adc:%d\n",port,pd_adc_read(0 , 0));
+
+
 	while (1) {
 		/* process VDM messages last */
 		pd_vdm_send_state_machine(port);
