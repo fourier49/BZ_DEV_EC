@@ -262,7 +262,6 @@ int pd_check_power_swap(int port)
 	 * to fix our role).
 	 */
 	return pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ? 1 : 0;
-
 }
 
 int pd_check_data_swap(int port, int data_role)
