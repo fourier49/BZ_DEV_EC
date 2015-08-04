@@ -55,6 +55,7 @@ static int last_volt_idx;
 static int cpower_con_status_chaged_flag = 0;
 static int cpower_pre_connect_status = 0;    //default will enter one time
 static int cpower_cur_connect_st = 0;
+static int LedCnt = 0;
 
 
 
@@ -377,6 +378,21 @@ void pd_check_cpower_deferred(void)
 					CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
 			}
 	}
+	else{
+		if(PD_ROLE_SOURCE == pd_get_role(0)){
+			//control LED breeze.
+			if (volt_idx == PDO_IDX_SRC_5V ){
+				if((LedCnt++)%20==0)
+					gpio_set_level(GPIO_LED_CONTROL, !gpio_get_level(GPIO_LED_CONTROL));
+			}else{
+				if((LedCnt++)%10==0)
+					gpio_set_level(GPIO_LED_CONTROL, !gpio_get_level(GPIO_LED_CONTROL));
+			}
+		}else{
+			gpio_set_level(GPIO_LED_CONTROL, 1);
+		}
+	}
+
 	if(0 != hook_call_deferred(pd_check_cpower_deferred, delay))
 		CPRINTF("[hook fail] call check charger \n");
 }
