@@ -9,17 +9,6 @@
 #define __BOARD_H
 
 /*==============================================================================*/
-/* 4 board types configurations
- * Emulation / Host  : CONFIG_BIZ_EMU_HOST (auto set: CONFIG_BIZ_DUAL_CC)
- * Emulation / Dock  : CONFIG_BIZ_EMU_DOCK
- * Kronitech, P-DC   : 
- * Kronitech, P-TypC : CONFIG_BIZ_DUAL_CC
- */
-#if 0
-#define CONFIG_BIZ_EMU_HOST    /* HOST emulation over STM32-Discovery board */
-#define CONFIG_BIZ_EMU_DOCK    /* HOST emulation over STM32-Discovery board */
-#define CONFIG_BIZ_DUAL_CC     /* there are 2 CC ports */
-#endif
 #include "biz_board.conf"
 
 /*--------------------------------------------------------------------------*/

@@ -393,7 +393,7 @@ int pd_check_power_swap(int port)
 	 * otherwise assume our role is fixed (not in S0 or console command
 	 * to fix our role).
 	 */
-    //we won't accept change from sink->src if no c-power connected
+    	//we won't accept change from sink->src if no c-power connected
 	if(pd_snk_is_vbus_provided(1) && pd_get_dual_role(port) == PD_DRP_TOGGLE_ON )
 	{
 		CPRINTF("C%d ch_pw_swap - accept\n",port);
@@ -489,7 +489,13 @@ void pd_check_cpower_power_nego_done_deferred(void)
 	//Fixme: miss commit.
 	if( mv > 1000) {
 		if(enable_power == 0) {
+			#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+			delay = 10*MSEC;
+			#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+			delay = 20*MSEC;
+			#else
 			delay = 50*MSEC;
+			#endif
 			enable_power = 1;
 			gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
 			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
@@ -523,32 +529,32 @@ DECLARE_DEFERRED(pd_cpower_unplung_deferred);
 void pd_check_cpower_deferred(void)
 {
 	uint32_t delay = 100*MSEC;
+	int pr_role;
 	cpower_cur_connect_st =  pd_is_connected(1)&pd_get_cc_state(1);
 	cpower_con_status_chaged_flag = cpower_pre_connect_status^cpower_cur_connect_st;
-      cpower_pre_connect_status = cpower_cur_connect_st ;
+	cpower_pre_connect_status = cpower_cur_connect_st ;
 	if( cpower_con_status_chaged_flag )
 	{
-		 if(cpower_cur_connect_st)
-	     {
-	       	CPRINTF("charger connected\n");
+		 if(cpower_cur_connect_st){
+		 	CPRINTF("charger connected\n");
 			vol_check_retry_times= 10;
 		        if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, 800*MSEC))
 					CPRINTF("[hook fail] call check charger pwr nego done\n");
 
-			 }else
-			 {
-			 		CPRINTF("charger disconnected\n");	
-					gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
-	                		valid_cpower_pd_src_cnt = 0;
-					valid_pd_src_pdo[0] =  PDO_FIXED(5000,  900, PDO_FIXED_FLAGS);
-					 if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
-					   CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
-			 }
-     }
+		  }else{
+		  	  CPRINTF("charger disconnected\n");	
+			  gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+			  gpio_set_level(GPIO_DS_Discharge, 0);//for RJ45 workaround
+	                  valid_cpower_pd_src_cnt = 0;
+			  valid_pd_src_pdo[0] =  PDO_FIXED(5000,  900, PDO_FIXED_FLAGS);
+			  if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
+			    CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
+		  }
+       }
 	else{ 
 		//if no changes 
 		if(cpower_cur_connect_st&&(PD_ROLE_SOURCE==pd_get_role(0))){
-			//control LED breeze.
+			//control LED breath.
 			if (volt_idx == PDO_IDX_SRC_5V )
 			{
 				if((LedCnt++)%20==0)
@@ -566,6 +572,16 @@ void pd_check_cpower_deferred(void)
 		}
 
 	}
+
+	//a workround to control rj45 hub power.
+	//becuase pd_get_flags will check the port state
+	//only in PD_STATE_SNK_READY or PD_STATE_SRC_READY
+	//the pr_role will be set.
+	pd_get_flags(0, &pr_role);
+	if((pr_role == PD_ROLE_SINK)||(pr_role == PD_ROLE_SOURCE)){
+			gpio_set_level(GPIO_DS_Discharge, 1);
+	}
+		
 	if(0 != hook_call_deferred(pd_check_cpower_deferred, delay))
 		CPRINTF("[hook fail] call check charger \n");
 }
@@ -581,7 +597,7 @@ DECLARE_CONSOLE_COMMAND(chg, command_charger,
 			"charger info",
 			NULL);
 
-
+#if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
 #ifdef __NEVER_USED__
 static void ___CONFIG_UFP__(void) {}
 #endif
@@ -603,7 +619,7 @@ const uint32_t vdo_ama = VDO_AMA(CONFIG_USB_PD_IDENTITY_HW_VERS,
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
 				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
-				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+				AMA_USBSS_U2_ONLY /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
 				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
@@ -644,8 +660,8 @@ const uint32_t vdo_dp_modes[MODE_CNT] =  {
 
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
 				MODE_DP_PIN_D , /* USB SS support GEN 1 and U2  */
-#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
-				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI  /* DFP pin cfg supported */
+		  		MODE_DP_PIN_C, /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
 				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
@@ -689,7 +705,18 @@ static int dp_status(int port, uint32_t *payload)
 				   (hpd == 1),       /* HPD_HI|LOW */
 				   0,		     /* request exit DP */
 				   0,		     /* request exit USB */
-				   1,		     /* MF pref */
+
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+				   1,			     /* MF pref */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI  /* DFP pin cfg supported */
+		  		   0,		     /* MF pref */
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
+				   1,	
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+				   1,	
+#else
+				   1,
+#endif
 				   gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
 				   0,		     /* power low */
 				   0x2);
@@ -730,7 +757,6 @@ static int dp_config(int port, uint32_t *payload)
 
 	// enable DP AUX
 	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
-
 #if 0
 	// send RESET pulse to external peripherals
 	//gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
@@ -849,6 +875,13 @@ int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 
 	return rsize;
 }
+#else
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
+{
+	return 0;
+}
+#endif
 
 
 //==============================================================================
