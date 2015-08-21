@@ -91,7 +91,6 @@ static int pd_find_pdo_index(int cnt, uint32_t *src_caps, int max_mv)
 		}
 #endif
 	}
-	 CPRINTS("[pd_find_pdo_index]MaxVol:%d mv MaxAmp:%dma maxW:%dmw idx:%d\n",max_mv,PD_MAX_CURRENT_MA,max_uw,ret);
 	return ret;
 }
 
@@ -167,8 +166,8 @@ void pd_process_source_cap(int port, int cnt, uint32_t *src_caps)
 	pd_set_input_current_limit(port, ma, mv);
 #endif
 
-#ifdef CONFIG_EXTERNAL_CHARGE_ADAPTER
-   pd_handle_cpower_capbliity(port,cnt,src_caps);	
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
+   pd_handle_cpower_capability(port,cnt,src_caps);	
 #endif
 
 }

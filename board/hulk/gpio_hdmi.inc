@@ -9,7 +9,7 @@
 // ALL GPIOs with interrupt handlers must be declared at the top of the gpio.inc
 //-------------------------------------------------------------------------------------
 #if defined(CONFIG_USB_PD_ALT_MODE) && !defined(CONFIG_USB_PD_ALT_MODE_DFP)
-PIO_INT(USB_P0_DP_HPD,       B, 5,  GPIO_INT_BOTH, hpd_event) 
+GPIO_INT(USB_P0_DP_HPD,       B, 5,  GPIO_INT_BOTH, hpd_event) 
 #endif
 
 

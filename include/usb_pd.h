@@ -669,7 +669,6 @@ enum pd_states {
  * @param port the port number
  */
 enum pd_states pd_get_state(int port);
-int pd_get_cc_state(int port);
 int pd_get_flags(int port, int *pr_role);
 
 #define PD_FLAGS_PING_ENABLED      (1 << 0) /* SRC_READY pings enabled */
@@ -719,6 +718,8 @@ enum pd_dual_role_states {
 	PD_DRP_FORCE_SINK,
 	PD_DRP_FORCE_SOURCE
 };
+#ifdef CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
+extern enum pd_dual_role_states drp_states[];
 /**
  * Get dual role state
  *
@@ -733,6 +734,22 @@ enum pd_dual_role_states pd_get_dual_role(int port);
  */
 void pd_set_dual_role(enum pd_dual_role_states state);
 void pd_set_dual_role_port(int port,enum pd_dual_role_states state);
+
+#else
+/**
+ * Get dual role state
+ *
+ * @return Current dual-role state, from enum pd_dual_role_states
+ */
+enum pd_dual_role_states pd_get_dual_role(void);
+/**
+ * Set dual role state, from among enum pd_dual_role_states
+ *
+ * @param state New state of dual-role port, selected from
+ *              enum pd_dual_role_states
+ */
+void pd_set_dual_role(enum pd_dual_role_states state);
+#endif
 
 /**
  * Get role, from among PD_ROLE_SINK and PD_ROLE_SOURCE
@@ -1137,17 +1154,17 @@ extern const int pd_src_pdo_cnt;
 extern const uint32_t pd_snk_pdo[];
 extern const int pd_snk_pdo_cnt;
 
-
-extern const uint32_t default_pd_snk_pdo[];
-extern const int default_pd_snk_pdo_cnt;
-
 /**
  * Get PD source power data objects.
  *
  * @param src_pdo pointer to the data to return.
  * @return number of PDOs returned.
  */
+#ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
 int pd_get_source_pdo(const uint32_t **src_pdo);
+int pd_get_snk_pdo(int port , const uint32_t **snk_pdo);
+int pd_handle_cpower_capability(int port, int cnt, uint32_t *src_caps);
+#endif
 
 /* Muxing for the USB type C */
 enum typec_mux {

@@ -21,8 +21,8 @@
 #include "timer.h"
 #include "util.h"
 
-#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC)
-#define POWER_SIGNALS_DEBOUNCE2_INTERVAL (500*MSEC)
+/*start time for hook to check c-power*/
+#define POWER_SIGNALS_DEBOUNCE_INTERVAL  (20*MSEC) 
 
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
@@ -270,42 +270,12 @@ void vbus0_evt(enum gpio_signal signal)
 }
 
 #ifdef CONFIG_BIZ_DUAL_CC
+/*For hulk , vbus1 isr event is not used due to hw limitation*/
 void vbus1_evt(enum gpio_signal signal)
 {
 	ccprintf("VBUS %d, %d!\n", signal, gpio_get_level(signal));
 	task_wake(TASK_ID_PD_P1);
 }
-#endif
-
-#ifndef CONFIG_BIZ_EMU_HOST
-#ifndef CONFIG_BIZ_HULK
-int pwr_dc_in_detection=0;
-
-static void pwr_in_debounce(void)
-{
-	int lvl = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
-	if (lvl != pwr_dc_in_detection)
-		return;
-
-	// whenever DC is in, we won't need Host's VBUS power
-	pd_pwr_local_change(pwr_dc_in_detection);
-
-	// we may get false HPD signals, get it being stablized
-	hpd_reported_event = hpd_none;
-	hook_call_deferred(hpd_lvl_deferred, POWER_SIGNALS_DEBOUNCE2_INTERVAL);
-
-	// task_wake(TASK_ID_PD_P1);
-}
-DECLARE_DEFERRED(pwr_in_debounce);
-
-void pwr_in_event(enum gpio_signal signal)
-{
-	pwr_dc_in_detection = gpio_get_level(GPIO_MCU_PWR_DC_IN_DET);
-	ccprintf("DC-IN %d!\n", pwr_dc_in_detection);
-
-	//hook_call_deferred(pwr_in_debounce, POWER_SIGNALS_DEBOUNCE_INTERVAL);
-}
-#endif
 #endif
 
 // must be after GPIO's signal definition
@@ -367,17 +337,7 @@ static void board_init_spi2(void)
 }
 #endif /* CONFIG_SPI_FLASH */
 
-#ifdef CONFIG_BIZ_EMU_HOST
-void pd_task_dummy(void)
-{
-	int port = TASK_ID_TO_PORT(task_get_current());
-	if (port == 0) {
-		while (1) task_wait_event(5000*MSEC);
-	}
-}
-#endif
 
-extern enum pd_dual_role_states drp_states[PD_PORT_COUNT];
 /* Initialize board. */
 static void board_init(void)
 {
@@ -402,26 +362,17 @@ static void board_init(void)
 	 */
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
-
-#ifdef CONFIG_BIZ_EMU_HOST
-	drp_states[0] = PD_DRP_TOGGLE_ON;
-	drp_states[1] = PD_DRP_TOGGLE_ON;
-#else
+  
+#ifdef CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
 	drp_states[0] = PD_DRP_TOGGLE_ON;
 	drp_states[1] = PD_DRP_TOGGLE_OFF;
-	/* Enable interrupts on VBUS transitions. */
-#ifndef CONFIG_BIZ_HULK
-	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
-	gpio_enable_interrupt(GPIO_MCU_PWR_DC_IN_DET);
-	pwr_in_event(GPIO_MCU_PWR_DC_IN_DET);
 #endif
 
-#ifdef CONFIG_BIZ_HULK
-	ccprintf("[hook] pd_check_cpower_deferred %d\n",POWER_SIGNALS_DEBOUNCE_INTERVAL);
-	hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
-#endif
+hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
 
-#endif
+ccprints("board_init \n");
+
+
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 
@@ -433,20 +384,21 @@ const struct adc_t adc_channels[] = {
 	[ADC_P0_CC_PD]  = {"P0_CC_PD",  3300, 4096, 0, STM32_AIN(0)},
 	[ADC_P1_CC1_PD] = {"P1_CC1_PD", 3300, 4096, 0, STM32_AIN(2)},
 	[ADC_P1_CC2_PD] = {"P1_CC2_PD", 3300, 4096, 0, STM32_AIN(5)},
-      [ADC_P1_VBUS_DT] = {"P1_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(6)},   //P1 vbus detect	
-	[ADC_P0_VBUS_DT] = {"P0_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(15)},   //P0 vbus detect	
-	[ADC_P1_20VBUS_DT] = {"USB_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(3)},   //P1 20V vbus detect
+	[ADC_P1_VBUS_DT] = {"P1_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(6)},
+	[ADC_P0_VBUS_DT] = {"P0_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(15)},
+	[ADC_P1_20VBUS_DT] = {"USB_VBUS_DETECT",  3300, 4096, 0, STM32_AIN(3)},
 	/* Vbus sensing. Converted to mV, full ADC is equivalent to 25.774V. */
 	[ADC_BOOSTIN] = {"V_BOOSTIN",  25774, 4096, 0, STM32_AIN(11)},
-	
-	};
+};
 BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 
 /* I2C ports */
 const struct i2c_port_t i2c_ports[] = {
+#ifdef CONFIG_BIZ_HULK_V2_0
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE !=  CONFIG_BIZ_HULK_V2_0_TYPE_DP
-		{"master", I2C_PORT_MASTER, 100,
+	{"master", I2C_PORT_MASTER, 100,
 		GPIO_MASTER_I2C_SCL, GPIO_MASTER_I2C_SDA},
+#endif
 #endif
 #if 0
 	{"slave",  I2C_PORT_SLAVE, 100,
@@ -527,6 +479,7 @@ const struct bos_context bos_ctx = {
 };
 
 
+
 //==============================================================================
 struct usb_port_mux
 {
@@ -536,21 +489,14 @@ struct usb_port_mux
 
 const struct usb_port_mux usb_muxes[] = {
 	{
-#ifndef CONFIG_BIZ_EMU_HOST
-#ifndef CONFIG_BIZ_HULK
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
-#endif
-		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE,
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE
+#else
+		.dp_2_4_lanes = GPIO_COUNT
 #endif
 	},
-#ifdef CONFIG_BIZ_EMU_HOST
-	{
-		.dp_mode_l    = GPIO_USB_P1_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P1_DP_SS_LANE,
-	},
-#endif
+
 };
 //BUILD_ASSERT(ARRAY_SIZE(usb_muxes) == PD_PORT_COUNT);
 
@@ -558,9 +504,12 @@ void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int po
 {
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 
+	ccprints("C%d board_set_usb_mux m:%d u:%d \n",port,mux,usb);
 	/* reset everything */
 	gpio_set_level(usb_mux->dp_mode_l,    0);   // default: disable DP AUX
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	gpio_set_level(usb_mux->dp_2_4_lanes, 0);   // default: 2 lanes mode
+#endif
 
 #if 0
 	/* Set D+/D- switch to appropriate level */
@@ -594,7 +543,9 @@ void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int po
 		gpio_set_level(usb_mux->dp_mode_l, 1);  // enable DP AUX
 	}
 	if (mux == TYPEC_MUX_DP) {
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 		gpio_set_level(usb_mux->dp_2_4_lanes, 1);  // 4 lanes
+#endif	
 	}
 #endif
 }
@@ -622,8 +573,13 @@ int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 #else
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 	int has_usb, has_dp;
-
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	has_usb = !gpio_get_level(usb_mux->dp_2_4_lanes);
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+	has_usb = 0;//hdmi only has u2
+#else
+	has_usb = 1;//vga and rj45 has 2 lanes dp and 2 lanes u3
+#endif
 	has_dp  = gpio_get_level(usb_mux->dp_mode_l);
 
 	if (has_usb) {
@@ -641,6 +597,7 @@ int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 
 void board_flip_usb_mux(int port)
 {
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 	static int toggle=0;
 #if 0
@@ -665,7 +622,7 @@ void board_flip_usb_mux(int port)
 
 	gpio_set_level(usb_mux->dp_2_4_lanes, !usb_polarity);
 	gpio_set_level(usb_mux->ss2_dp_mode, usb_polarity);
-#else
+#endif
 	gpio_set_level(usb_mux->dp_2_4_lanes, toggle);
 	toggle = 1 - toggle;
 #endif

@@ -60,7 +60,7 @@ GPIO(VBUS_DS_CTRL1,          C, 14, GPIO_OUT_LOW)
 GPIO(LED_CONTROL,            B, 11, GPIO_OUT_HIGH)
 
 GPIO(PWR_RST,                A, 7,  GPIO_OUT_LOW)/*system 5V,H->off*/
-GPIO(PWRONZ,                 A, 8,  GPIO_OUT_LOW)/*hub enable,H->off*/
+GPIO(PWRONZ,                 A, 8,  GPIO_OUT_HIGH)/*hub enable,H->off*/
 GPIO(LANE_SWITCH,            F, 0,  GPIO_INPUT)
 
 GPIO(USB_DM,                 A, 11, GPIO_ANALOG)

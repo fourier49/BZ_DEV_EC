@@ -9,6 +9,17 @@
 #define __BOARD_H
 
 /*==============================================================================*/
+/* 4 board types configurations
+ * Emulation / Host  : CONFIG_BIZ_EMU_HOST (auto set: CONFIG_BIZ_DUAL_CC)
+ * Emulation / Dock  : CONFIG_BIZ_EMU_DOCK
+ * Kronitech, P-DC   : 
+ * Kronitech, P-TypC : CONFIG_BIZ_DUAL_CC
+ */
+#if 0
+#define CONFIG_BIZ_EMU_HOST    /* HOST emulation over STM32-Discovery board */
+#define CONFIG_BIZ_EMU_DOCK    /* HOST emulation over STM32-Discovery board */
+#define CONFIG_BIZ_DUAL_CC     /* there are 2 CC ports */
+#endif
 #include "biz_board.conf"
 
 /*--------------------------------------------------------------------------*/
@@ -46,7 +57,7 @@
 #define CONFIG_RSA
 #define CONFIG_RWSIG
 #define CONFIG_SHA256
-#undef  CONFIG_I2C
+#define CONFIG_I2C
 #undef  CONFIG_LID_SWITCH
 #define CONFIG_STM_HWTIMER32
 #undef  CONFIG_TASK_PROFILING
@@ -55,7 +66,11 @@
 #define CONFIG_USB_BOS
 #undef  CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
+
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE !=  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
 #define CONFIG_USB_PD_ALT_MODE
+#endif
+
 #define CONFIG_USB_PD_HW_DEV_ID_BOARD_MAJOR USB_PD_HW_DEV_ID_HOHO
 #define CONFIG_USB_PD_HW_DEV_ID_BOARD_MINOR 2
 #define CONFIG_USB_PD_CUSTOM_VDM
@@ -67,8 +82,7 @@
 #define CONFIG_USBC_VCONN
 #undef  CONFIG_WATCHDOG_HELP
 #define CONFIG_USB_PD_DYNAMIC_SRC_CAP
-
-#define CONFIG_EXTERNAL_CHARGE_ADAPTER
+#define CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
 /*
  * DFP advised power (Type-C spec: Table 4-18 ~ 4-20)
  *-----------------------------------------------------
