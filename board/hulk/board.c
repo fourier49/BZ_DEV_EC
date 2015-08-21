@@ -481,10 +481,13 @@ const struct bos_context bos_ctx = {
 
 
 //==============================================================================
+#ifdef CONFIG_USBC_SS_MUX
 struct usb_port_mux
 {
 	enum gpio_signal dp_mode_l;
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	enum gpio_signal dp_2_4_lanes;
+#endif
 };
 
 const struct usb_port_mux usb_muxes[] = {
@@ -492,8 +495,6 @@ const struct usb_port_mux usb_muxes[] = {
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE
-#else
-		.dp_2_4_lanes = GPIO_COUNT
 #endif
 	},
 
@@ -627,4 +628,4 @@ void board_flip_usb_mux(int port)
 	toggle = 1 - toggle;
 #endif
 }
-
+#endif

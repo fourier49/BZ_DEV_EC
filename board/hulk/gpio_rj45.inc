@@ -48,7 +48,7 @@ GPIO(USB_VBUS_DETECT,        A, 3,  GPIO_ANALOG)
 GPIO(USB_C_RECEPTACLE_DETECT,A, 6,  GPIO_ANALOG)
 GPIO(USB_C_VBUS_DETECT,      A, 15, GPIO_ANALOG)
 
-GPIO(USB_P0_SBU_ENABLE,	     A, 7,  GPIO_OUT_LOW)/*Fixme:unused gpio*/	
+
 
 /* Discarge signals */
 GPIO(UP_Discharge,           C, 13, GPIO_OUT_LOW)

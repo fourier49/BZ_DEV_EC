@@ -254,9 +254,10 @@ static inline void pd_config_init(int port, uint8_t power_role)
 
 	/* Initialize TX pins and put them in Hi-Z */
 	pd_tx_init();
-
+#ifdef CONFIG_USBC_SS_MUX
 	/* Reset mux ... for NONE polarity doesn't matter */
 	board_set_usb_mux(port, TYPEC_MUX_NONE, USB_SWITCH_DISCONNECT, 0);
+#endif
 
 #ifdef CONFIG_BIZ_EMU_HOST
 	if (port == 1) {
