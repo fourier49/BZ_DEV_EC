@@ -369,7 +369,9 @@ static void board_init(void)
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
 
-//#ifndef CONFIG_BIZ_EMU_HOST
+	pd_set_dual_role_port(0 , PD_DRP_TOGGLE_ON);
+	pd_set_dual_role_port(1 , PD_DRP_TOGGLE_OFF);
+
 #if !defined(CONFIG_BIZ_HULK) && !defined(CONFIG_BIZ_EMU_HOST)
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);

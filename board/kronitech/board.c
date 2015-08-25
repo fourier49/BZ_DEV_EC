@@ -401,10 +401,9 @@ static void board_init(void)
 #endif
 
 #ifdef CONFIG_BIZ_EMU_HOST
-	drp_state = PD_DRP_TOGGLE_ON;
+	pd_set_dual_role(PD_DRP_TOGGLE_ON);
 #else
-	drp_state = PD_DRP_TOGGLE_ON;
-
+	pd_set_dual_role(PD_DRP_TOGGLE_ON);
 	/* Enable interrupts on VBUS transitions. */
 	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
 	gpio_enable_interrupt(GPIO_MCU_PWR_DC_IN_DET);

@@ -227,9 +227,6 @@ enum vdm_states {
 };
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
-/* Port dual-role state */
-enum pd_dual_role_states drp_state = PD_DRP_TOGGLE_OFF;
-
 /* Last received source cap */
 static uint32_t pd_src_caps[PD_PORT_COUNT][PDO_MAX_OBJECTS];
 static int pd_src_cap_cnt[PD_PORT_COUNT];
@@ -277,6 +274,8 @@ static struct pd_protocol {
 	int new_power_request;
 	/* Store previously requested voltage request */
 	int prev_request_mv;
+	/* Port dual-role state */
+	enum pd_dual_role_states drp_state;
 #endif
 
 	/* PD state for Vendor Defined Messages */
@@ -1736,15 +1735,27 @@ int pd_dev_store_rw_hash(int port, uint16_t dev_id, uint32_t *rw_hash,
 }
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
-enum pd_dual_role_states pd_get_dual_role(void)
+enum pd_dual_role_states pd_get_dual_role(port)
 {
-	return drp_state;
+	return pd[port].drp_state;
 }
 
 void pd_set_dual_role(enum pd_dual_role_states state)
 {
 	int i;
-	drp_state = state;
+	for (i = 0; i < PD_PORT_COUNT; i++) {
+		pd_set_dual_role_port(i,state);
+	}
+}
+
+void pd_set_dual_role_port(int port,enum pd_dual_role_states state)
+{
+	int i;
+
+	if(port >= PD_PORT_COUNT)
+		return;
+	
+	pd[port].drp_state = state;
 
 	for (i = 0; i < PD_PORT_COUNT; i++) {
 		/*
@@ -1753,8 +1764,8 @@ void pd_set_dual_role(enum pd_dual_role_states state)
 		 * are in the source disconnected state).
 		 */
 		if (pd[i].power_role == PD_ROLE_SOURCE &&
-		    (drp_state == PD_DRP_FORCE_SINK ||
-		     (drp_state == PD_DRP_TOGGLE_OFF
+		    (pd[i].drp_state == PD_DRP_FORCE_SINK ||
+		     (pd[i].drp_state== PD_DRP_TOGGLE_OFF
 		      && pd[i].task_state == PD_STATE_SRC_DISCONNECTED))) {
 			pd[i].power_role = PD_ROLE_SINK;
 			set_state(i, PD_STATE_SNK_DISCONNECTED);
@@ -1767,7 +1778,7 @@ void pd_set_dual_role(enum pd_dual_role_states state)
 		 * new DRP state is force source.
 		 */
 		if (pd[i].power_role == PD_ROLE_SINK &&
-		    drp_state == PD_DRP_FORCE_SOURCE) {
+		    pd[i].drp_state == PD_DRP_FORCE_SOURCE) {
 			pd[i].power_role = PD_ROLE_SOURCE;
 			set_state(i, PD_STATE_SRC_DISCONNECTED);
 			pd_set_host_mode(i, 1);
@@ -1775,6 +1786,7 @@ void pd_set_dual_role(enum pd_dual_role_states state)
 		}
 	}
 }
+
 
 int pd_get_role(int port)
 {
@@ -1995,7 +2007,7 @@ void pd_task(void)
 			}
 #ifdef CONFIG_USB_PD_DUAL_ROLE
 			/* Swap roles if time expired */
-			else if (drp_state != PD_DRP_FORCE_SOURCE &&
+			else if (pd[port].drp_state != PD_DRP_FORCE_SOURCE &&
 				 get_time().val >= next_role_swap) {
 				pd[port].power_role = PD_ROLE_SINK;
 				set_state(port, PD_STATE_SNK_DISCONNECTED);
@@ -2426,7 +2438,7 @@ void pd_task(void)
 			 * If no source detected, check for role toggle.
 			 * Do not toggle if VBUS is present.
 			 */
-			if (drp_state == PD_DRP_TOGGLE_ON &&
+			if (pd[port].drp_state== PD_DRP_TOGGLE_ON &&
 			    get_time().val >= next_role_swap &&
 			    !pd_snk_is_vbus_provided(port)) {
 				/* Swap roles to source */
@@ -3159,6 +3171,7 @@ static int command_pd(int argc, char **argv)
 	int port;
 	int duration;
 	char *e;
+	int i;
 
 	if (argc < 2)
 		return EC_ERROR_PARAM_COUNT;
@@ -3168,21 +3181,23 @@ static int command_pd(int argc, char **argv)
 	if (!strcasecmp(argv[1], "dualrole")) {
 		if (argc < 3) {
 			ccprintf("dual-role toggling: ");
-			switch (drp_state) {
-			case PD_DRP_TOGGLE_ON:
-				ccprintf("on\n");
-				break;
-			case PD_DRP_TOGGLE_OFF:
-				ccprintf("off\n");
-				break;
-			case PD_DRP_FORCE_SINK:
-				ccprintf("force sink\n");
-				break;
-			case PD_DRP_FORCE_SOURCE:
-				ccprintf("force source\n");
-				break;
+		for (i = 0; i < PD_PORT_COUNT; i++) {
+				switch (pd[i].drp_state) {
+				case PD_DRP_TOGGLE_ON:
+					ccprintf("C%d:on\n",i);
+					break;
+				case PD_DRP_TOGGLE_OFF:
+					ccprintf("C%d:off\n",i);
+					break;
+				case PD_DRP_FORCE_SINK:
+					ccprintf("C%d:force sink\n",i);
+					break;
+				case PD_DRP_FORCE_SOURCE:
+					ccprintf("C%d:force source\n",i);
+					break;
+				}
 			}
-		} else {
+		} else if (argc < 4) {
 			if (!strcasecmp(argv[2], "on"))
 				pd_set_dual_role(PD_DRP_TOGGLE_ON);
 			else if (!strcasecmp(argv[2], "off"))
@@ -3191,6 +3206,22 @@ static int command_pd(int argc, char **argv)
 				pd_set_dual_role(PD_DRP_FORCE_SINK);
 			else if (!strcasecmp(argv[2], "source"))
 				pd_set_dual_role(PD_DRP_FORCE_SOURCE);
+			else
+				return EC_ERROR_PARAM3;
+		}else {
+			port = strtoi(argv[3], &e, 10);
+			
+			if(port > PD_PORT_COUNT)
+				return EC_ERROR_PARAM4;
+			
+			if (!strcasecmp(argv[2], "on"))
+				pd_set_dual_role_port(port,PD_DRP_TOGGLE_ON);
+			else if (!strcasecmp(argv[2], "off"))
+				pd_set_dual_role_port(port,PD_DRP_TOGGLE_OFF);
+			else if (!strcasecmp(argv[2], "sink"))
+				pd_set_dual_role_port(port,PD_DRP_FORCE_SINK);
+			else if (!strcasecmp(argv[2], "source"))
+				pd_set_dual_role_port(port,PD_DRP_FORCE_SOURCE);
 			else
 				return EC_ERROR_PARAM3;
 		}
