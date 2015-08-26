@@ -16,6 +16,10 @@
 #include "util.h"
 #include "usb.h"
 
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+#include "system.h"
+#endif
+
 /* Console output macro */
 #define CPRINTF(format, args...) cprintf(CC_USB, format, ## args)
 
@@ -32,6 +36,12 @@
 
 #ifndef CONFIG_USB_BCD_DEV
 #define CONFIG_USB_BCD_DEV 0x0100 /* 1.00 */
+#endif
+
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+static int USB_BD_CMD=0;
+#define USB_BD_CMD_MASK			0
+#define USB_BD_CMD_ENTEDFU		1
 #endif
 
 /* USB Standard Device Descriptor */
@@ -82,6 +92,21 @@ static const struct usb_device_descriptor dev_desc_billboard = {
 	.bNumConfigurations = 1
 };
 
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+#define USB_IFACE_BILLBOARD   0
+const struct usb_interface_descriptor USB_IFACE_DESC(USB_IFACE_BILLBOARD) = {
+	.bLength            = USB_DT_INTERFACE_SIZE,
+	.bDescriptorType    = USB_DT_INTERFACE,
+	.bInterfaceNumber   = USB_IFACE_BILLBOARD,
+	.bAlternateSetting  = 0,
+	.bNumEndpoints      = 0,
+	.bInterfaceClass    = USB_CLASS_VENDOR_SPEC,
+	.bInterfaceSubClass = USB_SUBCLASS_GOOGLE_SERIAL,
+	.bInterfaceProtocol = USB_PROTOCOL_GOOGLE_SERIAL,
+	.iInterface         = USB_STR_CONSOLE_NAME,
+};
+#endif
+
 
 const uint8_t usb_string_desc[] = {
 	4, /* Descriptor size */
@@ -104,7 +129,11 @@ static int desc_left;
 /* pointer to descriptor data if any */
 static const uint8_t *desc_ptr;
 
-static int isBillboardOnly = 0;//defult should be 0,use usb console.
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+static int isBillboardOnly = 1;
+#else
+static int isBillboardOnly = 0; // defult should be 0, use usb console.
+#endif
 
 /* if current usb device class is billboard. */
 int usb_is_billboard_only()
@@ -231,6 +260,19 @@ static void ep0_rx(void)
 		default: /* unhandled request */
 			goto unknown_req;
 		}
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD 
+	} else if ((req & 0xff) == USB_TYPE_VENDOR) {
+		switch (req >> 8) {
+		case USB_BD_CMD_ENTEDFU:
+			btable_ep[0].tx_count = 0;
+			STM32_TOGGLE_EP(0, EP_TX_RX_MASK, EP_TX_RX_VALID, 0);
+			USB_BD_CMD=USB_BD_CMD_ENTEDFU;
+			hook_call_deferred(USB_BD_PARSER_CMD, 1000000);
+			break;
+		default: /* unhandled request */
+			goto unknown_req;
+		}
+#endif
 
 	} else {
 		goto unknown_req;
@@ -443,3 +485,28 @@ void *memcpy_from_usbram(void *dest, const void *src, size_t n)
 
 	return dest;
 }
+
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+DECLARE_DEFERRED(USB_BD_PARSER_CMD);
+
+void USB_BD_PARSER_CMD(void)
+{
+	int flag=0;
+
+	if(USB_BD_CMD<0)	return ;
+
+	switch(USB_BD_CMD)
+	{
+		case USB_BD_CMD_ENTEDFU: 	
+		{
+			flag=SYSTEM_RESET_ENTER_DFU;
+			system_reset(flag);
+			break;
+		}
+		default:
+			break;
+	}
+
+	return ;
+}
+#endif

@@ -8,6 +8,8 @@
 #ifndef __BOARD_H
 #define __BOARD_H
 
+#include "biz_board.conf"
+
 /* 48 MHz SYSCLK clock frequency */
 #define CPU_CLOCK 48000000
 
@@ -30,7 +32,6 @@
 #define CONFIG_SPI_MASTER_PORT 2
 #define CONFIG_SPI_CS_GPIO GPIO_PD_MCDP_SPI_CS_L
 #define CONFIG_USB
-#define CONFIG_USB_CONSOLE
 #define CONFIG_USB_BOS
 /* #define CONFIG_USB_INHIBIT_CONNECT */
 #define CONFIG_USB_POWER_DELIVERY
