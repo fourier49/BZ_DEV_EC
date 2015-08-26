@@ -449,7 +449,7 @@ static inline void set_state(int port, enum pd_states next_state)
 		disable_sleep(SLEEP_MASK_USB_PD);
 #endif
 
-	CPRINTF("C%d st%d\n", port, next_state);
+	CPRINTF("C%d %s\n", port, pd_state_names[next_state]);
 }
 
 /* increment message ID counter */
@@ -715,7 +715,7 @@ static int send_request(int port, uint32_t rdo)
 
 	bit_len = send_validate_message(port, header, 1, &rdo);
 	if (debug_level >= 1)
-		CPRINTF("REQ%d>\n", bit_len);
+		CPRINTF("C%d:REQ%d>\n",port, bit_len);
 
 	return bit_len;
 }

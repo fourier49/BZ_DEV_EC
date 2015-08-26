@@ -34,7 +34,7 @@
 #define INPUT_VOLTAGE_DEADBAND_MAX 11999
 
 //Default is definition for no cpower connected.
-#define PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE | PDO_FIXED_COMM_CAP)
+#define PDO_FIXED_FLAGS (PDO_FIXED_SUSPEND|PDO_FIXED_DUAL_ROLE|PDO_FIXED_COMM_CAP)
 
 
 const uint32_t pd_src_pdo[] = {
@@ -44,7 +44,7 @@ const int pd_src_pdo_cnt = ARRAY_SIZE(pd_src_pdo);
 
 #ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
 
-#define CPOWER_PDO_FIXED_FLAGS (PDO_FIXED_DUAL_ROLE| PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
+#define CPOWER_PDO_FIXED_FLAGS (PDO_FIXED_SUSPEND|PDO_FIXED_DUAL_ROLE| PDO_FIXED_EXTERNAL | PDO_FIXED_COMM_CAP)
 
 uint32_t cpower_pd_src_cnt = 0;
 uint32_t cpower_pd_src_pdo[5] = {
@@ -57,7 +57,7 @@ uint32_t cpower_pd_src_pdo[5] = {
 #endif
 
 const uint32_t pd_snk_pdo[] = {
-	PDO_FIXED(5000, 500, PDO_FIXED_FLAGS),
+	PDO_FIXED(5000, 900, PDO_FIXED_FLAGS),
 };
 const int pd_snk_pdo_cnt = ARRAY_SIZE(pd_snk_pdo);
 
@@ -74,7 +74,6 @@ static int last_volt_idx;
 
 /*charger conntected status flag used to decide if plug/unplug happen */
 static int cpower_con_status_chaged_flag = 0;
-static int cpower_pre_connect_status = 0;    //default will enter one time
 static int cpower_cur_connect_st = 0;
 static int LedCnt = 0;
 
@@ -82,7 +81,7 @@ static int LedCnt = 0;
 int pd_get_source_pdo(const uint32_t **src_pdo)
 {
 	int cnt = 0;
-	if(pd_is_connected(1) == 0){ 
+	if((pd_is_connected(1) == 0)&&(pd_snk_is_vbus_provided(1)==0)){ 
 		*src_pdo = pd_src_pdo;
 		cnt = pd_src_pdo_cnt;
 		CPRINTF("get_src_pdo,-cpower cnt:%d\n",cnt);
@@ -143,7 +142,7 @@ int pd_handle_cpower_capability(int port, int cnt, uint32_t *src_caps)
 		if(max_uw  <  uw) {
 			max_uw = uw;
 			numa = uw/mv;
-			cpower_pd_src_pdo[1] = PDO_FIXED(mv,numa, PDO_FIXED_FLAGS);
+			cpower_pd_src_pdo[1] = PDO_FIXED(mv,numa, CPOWER_PDO_FIXED_FLAGS);
 			CPRINTF("adapter_cap idx:%d mv:%d uw:%d new-ma%d \n", i, mv,uw,numa);
 		}
 	}
@@ -151,6 +150,7 @@ int pd_handle_cpower_capability(int port, int cnt, uint32_t *src_caps)
 		cpower_pd_src_cnt = 2;
 
 	return cpower_pd_src_cnt;
+	
 }
 #endif
 
@@ -177,7 +177,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 	const int src_pdo_cnt = pd_src_pdo_cnt;
 #endif
 
-	if(pd_snk_is_vbus_provided(1) == 0) {
+	if((pd_is_connected(1)==0)&&(pd_snk_is_vbus_provided(1) == 0)) {
 		//this case means when c-power is removed and 
 		//before completing the pr-swap from src->snk
 		//we have receive request voltage.
@@ -189,7 +189,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 		return EC_ERROR_INVAL; /* Invalid index */
 
 	/* check current ... */
-	pdo = pd_src_pdo[idx - 1];
+	pdo = src_pdo[idx - 1];
 	pdo_ma = (pdo & 0x3ff);
 
 	CPRINTF("Requested %d V %d mA (for %d/%d mA)\n",
@@ -393,6 +393,7 @@ int pd_check_power_swap(int port)
 
 int pd_check_data_swap(int port, int data_role)
 {
+	return 0;//for hulk,we should never accept for data swap to be a data source.
 	/* Allow data swap if we are a UFP, otherwise don't allow */
 	return (data_role == PD_ROLE_UFP) ? 1 : 0;
 }
@@ -441,8 +442,13 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 void pd_check_dr_role(int port, int dr_role, int flags)
 {
 	/* If UFP, try to switch to DFP */
-	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
+	//if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_UFP)
+	//	pd_request_data_swap(port);
+
+	/* If DFP, try to switch to UFP */
+	if ((flags & PD_FLAGS_PARTNER_DR_DATA) && dr_role == PD_ROLE_DFP)
 		pd_request_data_swap(port);
+
 }
 
 static int vol_check_retry_times = 0;
@@ -454,10 +460,19 @@ void pd_check_cpower_power_nego_done_deferred(void)
      
 	CPRINTS("[%d]mv:%d,enable:%d\n",vol_check_retry_times,mv,enable_power);
 
+	if( pd_snk_is_vbus_provided(1) == 0)
+		return;
+	
 	//Fixme: use real target voltage
 	if( mv > 1000) {
 		if(enable_power == 0) {
+			#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+			delay = 10*MSEC;
+			#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+			delay = 20*MSEC;
+			#else
 			delay = 50*MSEC;
+			#endif
 			enable_power = 1;
 			gpio_set_level(GPIO_VBUS_UP_CTRL1, 0);
 			if(0 != hook_call_deferred(pd_check_cpower_power_nego_done_deferred, delay))
@@ -489,9 +504,9 @@ DECLARE_DEFERRED(pd_cpower_unplung_deferred);
 void pd_check_cpower_deferred(void)
 {
 	uint32_t delay = 100*MSEC;
+	cpower_con_status_chaged_flag = (cpower_cur_connect_st == pd_snk_is_vbus_provided(1))?0:1;
 	cpower_cur_connect_st =  pd_snk_is_vbus_provided(1);
-	cpower_con_status_chaged_flag = cpower_pre_connect_status^cpower_cur_connect_st;
-	cpower_pre_connect_status = cpower_cur_connect_st ;
+
 	if( cpower_con_status_chaged_flag )	{
 		if(cpower_cur_connect_st){
 			CPRINTF("charger connected\n");
@@ -501,17 +516,20 @@ void pd_check_cpower_deferred(void)
 		}else{
 			CPRINTF("charger disconnected\n");
 #ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP	
-			cpower_pd_src_cnt = 0;
+			cpower_pd_src_cnt = 1;
 			cpower_pd_src_pdo[0] = PDO_FIXED(5000,900,PDO_FIXED_FLAGS);
 #endif				
 			gpio_set_level(GPIO_VBUS_DS_CTRL1, 0);
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+ 			gpio_set_level(GPIO_DS_Discharge, 0);//for RJ45 workaround
+#endif
 			if(0 != hook_call_deferred(pd_cpower_unplung_deferred, 1000*MSEC))
 				CPRINTF("[hook fail]pd_cpower_unplung_deferred\n");
 		}
 	}
 	else{
 		if(PD_ROLE_SOURCE == pd_get_role(0)){
-			//control LED breeze.
+			//control LED breath.
 			if (volt_idx == PDO_IDX_SRC_5V ){
 				if((LedCnt++)%20==0)
 					gpio_set_level(GPIO_LED_CONTROL, !gpio_get_level(GPIO_LED_CONTROL));
@@ -523,12 +541,32 @@ void pd_check_cpower_deferred(void)
 			gpio_set_level(GPIO_LED_CONTROL, 1);
 		}
 	}
-
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
+	//a workround to control rj45 hub power.
+	//becuase pd_get_flags will check the port state
+	//only in PD_STATE_SNK_READY or PD_STATE_SRC_READY
+	//the pr_role will be set.
+	pd_get_flags(0, &pr_role);
+	if((pr_role == PD_ROLE_SINK)||(pr_role == PD_ROLE_SOURCE)){
+			gpio_set_level(GPIO_DS_Discharge, 1);
+	}
+#endif
 	if(0 != hook_call_deferred(pd_check_cpower_deferred, delay))
 		CPRINTF("[hook fail] call check charger \n");
 }
 DECLARE_DEFERRED(pd_check_cpower_deferred);
 
+static int command_charger(int argc, char **argv)
+{
+	ccprintf("Display pdo list");
+	return EC_SUCCESS;
+}
+DECLARE_CONSOLE_COMMAND(ipdo, command_charger,
+			"",
+			"pdo information",
+			NULL);
+
+#if defined(CONFIG_USB_PD_ALT_MODE) 
 /* ----------------- Vendor Defined Messages ------------------ */
 
 
@@ -550,7 +588,7 @@ const uint32_t vdo_ama = VDO_AMA(CONFIG_USB_PD_IDENTITY_HW_VERS,
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
 				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
-				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
+				AMA_USBSS_U2_ONLY /* USB SS support U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
 				AMA_USBSS_U31_GEN1 /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
@@ -592,11 +630,11 @@ const uint32_t vdo_dp_modes[MODE_CNT] =  {
 #if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45
 				MODE_DP_PIN_D , /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
-				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+				MODE_DP_PIN_C, /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_VGA
 				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
 #elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
-				MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
+				MODE_DP_PIN_C|MODE_DP_PIN_D, /* USB SS support GEN 1 and U2  */
 #else
 				 MODE_DP_PIN_C  /* DFP pin cfg supported */
 		  		| MODE_DP_PIN_D,
@@ -636,7 +674,11 @@ static int dp_status(int port, uint32_t *payload)
 				   (hpd == 1),       /* HPD_HI|LOW */
 				   0,		     /* request exit DP */
 				   0,		     /* request exit USB */
-				   1,		     /* MF pref */
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+				   0,		     /* MF pref */
+#else
+				   1,
+#endif
 				   gpio_get_level(GPIO_USB_P0_SBU_ENABLE),
 				   0,		     /* power low */
 				   0x2);
@@ -648,13 +690,12 @@ static void dp_switch_4L_2L(void)
 {
 	enum hpd_event ev;
 
-#ifndef CONFIG_BIZ_HULK
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
 	// send RESET pulse to external peripherals
-	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
-	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  1);
-
+	//gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  1);
+	//gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  1);
 	usleep(300);
-	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 1);
+	gpio_set_level(GPIO_MCDP_RESET_L, 1);
 #endif
 	ev = (gpio_get_level(GPIO_USB_P0_DP_HPD)) ? hpd_high : hpd_low;
 	pd_send_hpd(0, ev);
@@ -667,21 +708,22 @@ static int dp_config(int port, uint32_t *payload)
 
 	if (!PD_DP_CFG_DPON(payload[1])) {
 		gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 0);  // disable DP AUX
-#ifndef CONFIG_BIZ_HULK
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 0);  // 2 lanes
 #endif
 		return 1;
 	}
 	// enable DP AUX
 	gpio_set_level(GPIO_USB_P0_SBU_ENABLE, 1);
-
-#ifndef CONFIG_BIZ_HULK
-	gpio_set_level(GPIO_MCU_CHIPS_RESET_EN, 0);
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+	gpio_set_level(GPIO_MCDP_RESET_L, 0);
+#endif
 
 	// send RESET pulse to external peripherals
-	gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
-	gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
+	//gpio_set_level(GPIO_MCU_PWR_STDBY_LAN,  0);
+	//gpio_set_level(GPIO_MCU_PWR_STDBY_HUB,  0);
 
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	// DP 4 lanes / 2 lanes switch
 	if (PD_VDO_MODE_DP_SNKP(payload[1]) & MODE_DP_PIN_C)
 		gpio_set_level(GPIO_USB_P0_DP_SS_LANE, 1);  // 4 lanes
@@ -791,5 +833,14 @@ int pd_custom_vdm(int port, int cnt, uint32_t *payload,
 	return rsize;
 }
 
+#else
+int pd_custom_vdm(int port, int cnt, uint32_t *payload,
+		  uint32_t **rpayload)
+{
+	
+	return 0;
+}
+
+#endif
 
 //==============================================================================

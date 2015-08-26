@@ -79,6 +79,8 @@ static int rx_edge_ts_idx[PD_PORT_COUNT];
 /* keep track of transmit polarity for DMA interrupt */
 static int tx_dma_polarities[PD_PORT_COUNT];
 
+static struct mutex txtim_lock;
+
 void pd_init_dequeue(int port)
 {
 	/* preamble ends with 1 */
@@ -301,6 +303,8 @@ static void tx_dma_done(void *data)
 	/* Stop counting */
 	pd_phy[port].tim_tx->cr1 &= ~1;
 
+	mutex_unlock(&txtim_lock);
+
 #if defined(CONFIG_COMMON_RUNTIME) && defined(CONFIG_DMA_DEFAULT_HANDLERS)
 	task_set_event(PORT_TO_TASK_ID(port), TASK_EVENT_DMA_TC, 0);
 #endif
@@ -319,6 +323,7 @@ int pd_start_tx(int port, int polarity, int bit_len)
 		return -5;
 #endif /* !CONFIG_USB_PD_TX_PHY_ONLY */
 
+	mutex_lock(&txtim_lock);
 	/* Initialize spi peripheral to prepare for transmission. */
 	pd_tx_spi_init(port);
 
@@ -603,6 +608,10 @@ void pd_hw_init(int port, int role)
 	struct pd_physical *phy = &pd_phy[port];
 	uint32_t val;
 
+
+	mutex_lock(&txtim_lock);
+	CPRINTS("C:%d pd_hw_init+\n ",port);
+	
 	/* Initialize all PD pins to default state based on desired role */
 	pd_config_init(port, role);
 
@@ -656,8 +665,10 @@ void pd_hw_init(int port, int role)
 	/* Configure the reception side : comparators + edge timer + DMA */
 	pd_hw_init_rx(port);
 #endif /* CONFIG_USB_PD_TX_PHY_ONLY */
+	mutex_unlock(&txtim_lock);
 
-	CPRINTS("USB PD initialized");
+	//CPRINTS("USB PD initialized");
+	CPRINTS("C:%d pd_hw_init-\n ",port);
 }
 
 void pd_set_clock(int port, int freq)

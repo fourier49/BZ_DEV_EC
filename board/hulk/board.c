@@ -362,14 +362,15 @@ static void board_init(void)
 	 */
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
+  
 
 	pd_set_dual_role_port(0 , PD_DRP_TOGGLE_ON);
 	pd_set_dual_role_port(1 , PD_DRP_TOGGLE_OFF);
+	
+	hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
 
-#if !defined(CONFIG_BIZ_HULK) && !defined(CONFIG_BIZ_EMU_HOST)
-	/* Enable interrupts on VBUS transitions. */
-	gpio_enable_interrupt(GPIO_USB_P0_VBUS_WAKE);
-#endif
+	ccprints("board_init \n");
+
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
 
@@ -392,8 +393,10 @@ BUILD_ASSERT(ARRAY_SIZE(adc_channels) == ADC_CH_COUNT);
 /* I2C ports */
 const struct i2c_port_t i2c_ports[] = {
 #ifdef CONFIG_BIZ_HULK_V2_0
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE !=  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	{"master", I2C_PORT_MASTER, 100,
 		GPIO_MASTER_I2C_SCL, GPIO_MASTER_I2C_SDA},
+#endif
 #endif
 #if 0
 	{"slave",  I2C_PORT_SLAVE, 100,
@@ -475,25 +478,23 @@ const struct bos_context bos_ctx = {
 
 
 //==============================================================================
+#ifdef CONFIG_USBC_SS_MUX
 struct usb_port_mux
 {
 	enum gpio_signal dp_mode_l;
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	enum gpio_signal dp_2_4_lanes;
+#endif
 };
 
 const struct usb_port_mux usb_muxes[] = {
 	{
-#ifndef CONFIG_BIZ_EMU_HOST
 		.dp_mode_l    = GPIO_USB_P0_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE, /*in gpio.inc , define as no-used pin*/
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
+		.dp_2_4_lanes = GPIO_USB_P0_DP_SS_LANE
 #endif
 	},
-#ifdef CONFIG_BIZ_EMU_HOST
-	{
-		.dp_mode_l    = GPIO_USB_P1_SBU_ENABLE,
-		.dp_2_4_lanes = GPIO_USB_P1_DP_SS_LANE,
-	},
-#endif
+
 };
 //BUILD_ASSERT(ARRAY_SIZE(usb_muxes) == PD_PORT_COUNT);
 
@@ -501,9 +502,12 @@ void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int po
 {
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 
+	ccprints("C%d board_set_usb_mux m:%d u:%d \n",port,mux,usb);
 	/* reset everything */
 	gpio_set_level(usb_mux->dp_mode_l,    0);   // default: disable DP AUX
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	gpio_set_level(usb_mux->dp_2_4_lanes, 0);   // default: 2 lanes mode
+#endif
 
 #if 0
 	/* Set D+/D- switch to appropriate level */
@@ -537,7 +541,9 @@ void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int po
 		gpio_set_level(usb_mux->dp_mode_l, 1);  // enable DP AUX
 	}
 	if (mux == TYPEC_MUX_DP) {
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 		gpio_set_level(usb_mux->dp_2_4_lanes, 1);  // 4 lanes
+#endif	
 	}
 #endif
 }
@@ -565,8 +571,13 @@ int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 #else
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 	int has_usb, has_dp;
-
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	has_usb = !gpio_get_level(usb_mux->dp_2_4_lanes);
+#elif CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_HDMI
+	has_usb = 0;//hdmi only has u2
+#else
+	has_usb = 1;//vga and rj45 has 2 lanes dp and 2 lanes u3
+#endif
 	has_dp  = gpio_get_level(usb_mux->dp_mode_l);
 
 	if (has_usb) {
@@ -584,6 +595,7 @@ int board_get_usb_mux(int port, const char **dp_str, const char **usb_str)
 
 void board_flip_usb_mux(int port)
 {
+#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 	static int toggle=0;
 #if 0
@@ -608,9 +620,9 @@ void board_flip_usb_mux(int port)
 
 	gpio_set_level(usb_mux->dp_2_4_lanes, !usb_polarity);
 	gpio_set_level(usb_mux->ss2_dp_mode, usb_polarity);
-#else
+#endif
 	gpio_set_level(usb_mux->dp_2_4_lanes, toggle);
 	toggle = 1 - toggle;
 #endif
 }
-
+#endif
