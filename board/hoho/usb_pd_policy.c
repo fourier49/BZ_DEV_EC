@@ -202,7 +202,9 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 		rv = 1;
 	}
 	
-#ifndef CONFIG_USB_CONSOLE
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+
+#else
 //Beccause we need to establish usb connection when console needed. 
 	if (rv)
 		/*
