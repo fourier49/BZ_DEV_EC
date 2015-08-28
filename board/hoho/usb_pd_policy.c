@@ -71,6 +71,12 @@ void pd_power_supply_reset(int port)
 
 int pd_board_checks(void)
 {
+	int port = 0;
+	if (!pd_is_connected(port))
+	{
+		set_billboard_status(USB_SID_DISPLAYPORT, ALT_MODE_CONFIG_NOT_ATTMPT);
+	}
+
 	return EC_SUCCESS;
 }
 

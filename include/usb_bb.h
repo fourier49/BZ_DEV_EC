@@ -49,6 +49,14 @@ struct usb_bb_caps_base_descriptor {
 #define USB_BB_VCONN_PWR_6W      6
 /* Note, 7W (111b) is reserved */
 
+enum bmConfig {
+	UNSPECIFIED_ERROR = 0,
+	ALT_MODE_CONFIG_NOT_ATTMPT,
+	ALT_MODE_CONFIG_UNSUCCESS,
+	ALT_MODE_CONFIG_SUCCESS
+};
+
+void set_billboard_status(uint16_t svid, uint8_t status);
 
 #endif /* USB_BB_H */
 

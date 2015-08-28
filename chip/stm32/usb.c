@@ -390,7 +390,7 @@ void usb_init(void)
 	/* set interrupts mask : reset/correct tranfer/errors */
 	STM32_USB_CNTR = 0xe400;
 
-#ifndef CONFIG_USB_INHIBIT_CONNECT
+#if !defined(CONFIG_USB_INHIBIT_CONNECT) || defined(BIZCFG_BILLBOARD_ALWAYS_CONNECT)
 	usb_connect();
 #endif
 
