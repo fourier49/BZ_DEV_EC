@@ -73,7 +73,8 @@ const uint8_t USBD_DeviceDesc[USB_SIZ_DEVICE_DESC] =
   HIBYTE(USBD_VID),           /*idVendor*/
   LOBYTE(USBD_PID),           /*idVendor*/
   HIBYTE(USBD_PID),           /*idVendor*/
-  0x00,                       /*bcdDevice rel. 2.00*/
+	// Change USB secription version info: from 0200 to 0201
+  0x01,                       /*bcdDevice rel. 2.01*/
   0x02,
   USBD_IDX_MFC_STR,           /*Index of manufacturer  string*/
   USBD_IDX_PRODUCT_STR,       /*Index of product string*/

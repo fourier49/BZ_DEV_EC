@@ -50,7 +50,8 @@ int rsa_verify(const struct rsa_public_key *key,
 	       const uint8_t *sha,
 	       uint32_t *workbuf32);
 
-int check_rw_signature(void);
+// Check rw signature by different verify region in Video chip firmware link table (address: 0x6000, offset 4bytes)  				 
+int check_rw_signature(uint32_t startAdd,uint32_t size);
 
 #endif /* !__ASSEMBLER__ */
 

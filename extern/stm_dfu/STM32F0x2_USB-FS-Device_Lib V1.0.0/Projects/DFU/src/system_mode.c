@@ -20,6 +20,8 @@
 #define IRAM_SIZE		0x00004000
 #endif
 
+// Add enter vcu flag	
+#define SYSTEM_RESET_ENTER_VCU	 (1<<13)
 #define SYSTEM_RESET_ENTER_DFU   (1<<14)
 #define SYSTEM_SKIP_VERIFY_SIG	 (1<<15)
 #define RESET_FLAG_HARD        	 (1 << 11)  /* Hard reset from software */
@@ -159,6 +161,25 @@ int check_enter_dfu(void)
 		{
 				reset_flag = reset_flag & ~SYSTEM_RESET_ENTER_DFU;
 		}
+		//update reset flag in backup data register.
+		bkpdata_write(BKPDATA_INDEX_SAVED_RESET_FLAGS,reset_flag);
+	}
+	return ret;
+}
+
+// Add check enter vcu function
+int check_enter_vcu(void)
+{
+	int ret = 0;
+	uint16_t reset_flag = 0;
+	reset_flag = bkpdata_read(BKPDATA_INDEX_SAVED_RESET_FLAGS);
+	
+  printf("check_enter_vcu... flag:0x%x \n\r",reset_flag);
+
+	if(reset_flag & SYSTEM_RESET_ENTER_VCU)
+	{
+		ret = 1;
+		reset_flag = reset_flag & ~(SYSTEM_RESET_ENTER_VCU);
 		//update reset flag in backup data register.
 		bkpdata_write(BKPDATA_INDEX_SAVED_RESET_FLAGS,reset_flag);
 	}

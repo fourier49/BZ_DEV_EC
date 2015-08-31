@@ -47,7 +47,8 @@ e (0x45): Readable and Writeable
 f (0x46): Erasable and Writeable
 g (0x47): Readable, Erasable and Writeable
 */
-#define FLASH_IF_STRING    (uint8_t*) "@Internal Flash   /0x08000000/64*001Ka,64*001Kg"  
+// Change flash writeable range => 20K RO, 108K RW for 0201 Video chip update
+#define FLASH_IF_STRING    (uint8_t*) "@Internal Flash   /0x08000000/20*001Ka,108*001Kg"
 
 /* Exported types ------------------------------------------------------------*/
 /* Exported macro ------------------------------------------------------------*/

@@ -45,27 +45,23 @@ const struct rsa_public_key pkey __attribute__((section(".rsa_pubkey.__at_0x0800
 #define CONFIG_FLASH_BANK_SIZE  0x1000
 #define CONFIG_FLASH_ERASE_SIZE 0x0800  /* erase bank size */
 #define CONFIG_FLASH_WRITE_SIZE 0x0002  /* minimum write size */
-#define CONFIG_FLASH_BASE       0x08000000  
-#define CONFIG_FW_IMAGE_SIZE    (CONFIG_FLASH_SIZE / 2)
+#define CONFIG_FLASH_BASE       0x08000000
+// ver 0201 RO code size : 20K 
 #define CONFIG_FW_RO_OFF        0
-#define CONFIG_FW_RO_SIZE       (CONFIG_FW_IMAGE_SIZE - CONFIG_FW_PSTATE_SIZE)
-#define CONFIG_FW_RW_OFF        (CONFIG_FW_RO_OFF + CONFIG_FW_IMAGE_SIZE)
-#define CONFIG_FW_RW_SIZE       (CONFIG_FLASH_SIZE - CONFIG_FW_IMAGE_SIZE)
+#define CONFIG_FW_RO_SIZE       0x5000 // 20K
 
-	
-/* The RSA signature is stored at the end of the RW firmware */
-static const void *rw_sig = (void *) (CONFIG_FLASH_BASE + CONFIG_FW_RW_OFF + CONFIG_FW_RW_SIZE - RSANUMBYTES);
-
-/* RW firmware reset vector */
-static uint32_t * const rw_rst =
-	(uint32_t *)(CONFIG_FLASH_BASE+CONFIG_FW_RW_OFF+4);
-
-int check_rw_signature(void);
+// Start address and size of FW sha256 verify region : In VCU link table
+int check_rw_signature(uint32_t startAdd,uint32_t size);
 
 uint8_t g_u8_rsa_workbuf[3 * RSANUMBYTES];
 
-int check_rw_signature(void)
+int check_rw_signature(uint32_t startAdd,uint32_t size)
 {
+	/* The RSA signature is stored at the end of the RW firmware */
+	const void *rw_sig = (void *) (startAdd + size - RSANUMBYTES);
+	/* RW firmware reset vector */
+	uint32_t * const rw_rst = (uint32_t *)(startAdd+4);
+
 	struct sha256_ctx ctx;
 	int good;
 	uint8_t *hash;
@@ -75,18 +71,17 @@ int check_rw_signature(void)
 	if (*rw_rst == 0xffffffff)
 		return 0;
 
-	CPRINTF("Verifying RW image...");
+	CPRINTF("Verifying RW image...Start address: 0x%08X, Size: 0x%08X\r\n",startAdd,size);
 	/* SHA-256 Hash of the RW firmware */
 	SHA256_init(&ctx);
-	SHA256_update(&ctx, (void *)(CONFIG_FLASH_BASE + CONFIG_FW_RW_OFF ),
-		      CONFIG_FW_RW_SIZE - RSANUMBYTES);
+	SHA256_update(&ctx, (void *)startAdd,size - RSANUMBYTES);
 	hash = SHA256_final(&ctx);
 
 	good = rsa_verify(&pkey, (void *)rw_sig, (void *)hash, rsa_workbuf);
 	if (good) {
-		CPRINTF("RW image verified");
+		CPRINTF("RW image verified\r\n");
 	} else {
-		CPRINTS("RSA verify FAILED");
+		CPRINTS("RSA verify FAILED\r\n");
 		//pd_log_event(PD_EVENT_ACC_RW_FAIL, 0, 0, NULL);
 	}
 	return good;

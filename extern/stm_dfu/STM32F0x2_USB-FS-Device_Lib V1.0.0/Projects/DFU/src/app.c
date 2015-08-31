@@ -31,12 +31,49 @@
 #include "usbd_usr.h"
 #include "usbd_desc.h"
 
+/* RW image main funtion link table in vedio chip update(VCU) defintion
+// In vedio chip firmware, link table data structure is below:
+struct VCU_Link_Table {
+	uint64_t LinktlbMagicNum;  // Link table Head token
+	uint32_t VCUsize;          // VCU FW size
+	uint32_t VCUFWVer;         // VCU FW Version
+};
+
+const struct VCU_Link_Table  testlink __attribute__((at(VCU_IMAGE_START_ADDRESS+LINK_TABLE_OFFSET)))=
+{
+	0x1357246809ABCDEF,	// Link table Head token magic word
+	0x0000B000,
+	0x00000001
+};
+*/
+
+struct VCU_Link_Table {
+	uint64_t LinktlbMagicNum;  // Link table Head token
+	uint32_t VCUsize;          // VCU FW size
+	uint32_t VCUFWVer;         // VCU FW Version
+};
+
+#define IMAGE_START_ADDRESS			0x08000000
+#define IMAGE_TOTAL_SIZE				0x20000			// 128K
+#define VCU_IMAGE_START_ADDRESS	0x08005000	// RO size : 20K
+#define DEFAULT_RW_JMP_ADDRESS  0x08010000  // if no VCU table, Default RW Jump address : 0x08010000, size 64K.
+
+
+#define LINK_MAGIC_NUMBER 			0x1357246809ABCDEF
+#define LINK_TABLE_OFFSET				0x1000	// Offset 4K 
+#define LINK_VCU_MAX_SIZE				0xB000 // Maximum size : 44K
+	
+/* Set VCU Link table phsycal address*/
+const struct VCU_Link_Table* vcu_linktlb = (struct VCU_Link_Table *)(VCU_IMAGE_START_ADDRESS+LINK_TABLE_OFFSET);
+
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
 /* Private macro -------------------------------------------------------------*/
 /* Private variables ---------------------------------------------------------*/
 extern int check_enter_dfu(void);
-extern int check_rw_signature(void);
+// Add check vcu enter and rw signature verify region from VCU link table
+extern int check_enter_vcu(void);
+extern int check_rw_signature(uint32_t startAdd,uint32_t size);
 extern int check_verify_signature(void);
 
 
@@ -148,16 +185,17 @@ void Kronitech_HW_DeInit(void)
 }
 #endif
 
-void Jump_to_main_application()
+// Jmp application by different region of VCU link table
+void Jump_to_main_application(uint32_t App_startAdd)
 {
-	 if (((*(__IO uint32_t*)APP_DEFAULT_ADD) & 0x2FFE0000 ) == 0x20000000)
+	 if (((*(__IO uint32_t*)App_startAdd) & 0x2FFE0000 ) == 0x20000000)
     { /* Jump to user application */
       
-		JumpAddress = *(__IO uint32_t*) (APP_DEFAULT_ADD + 4);
+		JumpAddress = *(__IO uint32_t*) (App_startAdd + 4);
     Jump_To_Application = (pFunction) JumpAddress;
 		printf("\r\nJump to APP... %x\r\n", (unsigned int)Jump_To_Application);
     /* Initialize user application's Stack Pointer */
-    __set_MSP(*(__IO uint32_t*) APP_DEFAULT_ADD);
+    __set_MSP(*(__IO uint32_t*) App_startAdd);
     Jump_To_Application();
 		}
 }
@@ -170,6 +208,11 @@ void Jump_to_main_application()
 int main(void)
 {
 	int start_app = 1; //default will start application.
+	// Add VCU and RW region check
+	uint32_t 	VCU_size = 0;
+	uint32_t 	verify_startAdd = VCU_IMAGE_START_ADDRESS;
+	uint32_t 	verify_size = IMAGE_START_ADDRESS + IMAGE_TOTAL_SIZE - VCU_IMAGE_START_ADDRESS;
+	
   /*!< At this stage the microcontroller clock setting is already configured, 
        this is done through SystemInit() function which is called from startup
        file (startup_stm32f072.s) before to branch to application main.
@@ -207,11 +250,11 @@ int main(void)
   /* The Application layer has only to call USBD_Init to 
   initialize the USB low level driver, the USB device library, the USB clock 
   ,pins and interrupt service routine (BSP) to start the Library*/
-  
-  USBD_Init(&USB_Device_dev,
+	// Avoid reinitial on RW, Initial USB should be Only in DFU mode
+  /*USBD_Init(&USB_Device_dev,
             &USR_desc, 
             &DFU_cb, 
-            &USR_cb);
+            &USR_cb);*/
   
   /* Setup SysTick Timer for 10 msec interrupts 
   This interrupt is used to display the current state of the DFU core */
@@ -224,12 +267,43 @@ int main(void)
   }
 #endif
 
+	// VCU link table check :
+	printf("LinktlbMagicNum = %llX, VCUsize = 0x%08X\r\n",vcu_linktlb->LinktlbMagicNum,vcu_linktlb->VCUsize);
+	if( (vcu_linktlb->LinktlbMagicNum==LINK_MAGIC_NUMBER)&&(vcu_linktlb->VCUsize>LINK_TABLE_OFFSET)/*&&(vcu_linktlb->VCUsize<=LINK_VCU_MAX_SIZE)*/ )
+	{
+		printf("Link table found!\r\n");
+		VCU_size = vcu_linktlb->VCUsize;
+	}
+	
+	// Add backup domain initial here because Origin backup domain initial is in USBD_Init(change to DFU mode after dfu&vcu judgement)
+	USBD_USR_Init();
+
   if (check_enter_dfu() == 0)
   {
+		if ( check_enter_vcu()&& VCU_size ) // enter vcu and vcu table valid
+		{
+			verify_size = VCU_size;
+			printf("Enter VCU\r\n");
+		}
+		else																// otherwise, enter RW
+		{
+			if(VCU_size==0)	// No VCU table, Jump to default RW address
+			{
+				verify_startAdd = DEFAULT_RW_JMP_ADDRESS;
+				verify_size = IMAGE_START_ADDRESS + IMAGE_TOTAL_SIZE - DEFAULT_RW_JMP_ADDRESS;
+			}
+			else
+			{
+				verify_startAdd += VCU_size;
+				verify_size -= VCU_size;
+			}
+			printf("Enter RW\r\n");
+		}
+		
 		if(check_verify_signature())
 		{
 				//verify signature before jump to application.
-				start_app = check_rw_signature();
+				start_app = check_rw_signature(verify_startAdd,verify_size);
 		}
 		//if start to application
 		if(start_app)
@@ -238,7 +312,7 @@ int main(void)
 			USBD_DeInit(&USB_Device_dev); 
 			USB_BSP_mDelay(100);
 			/* Jump to user application */
-			Jump_to_main_application();
+			Jump_to_main_application(verify_startAdd);
 		}
   }
 	
@@ -249,6 +323,12 @@ int main(void)
 
   // stay at boot loader
   printf("\r\nenter dfu mode\r\n");
+	
+	//Initial USB should be Only in DFU mode to avoid reinitial USB by RO and RW
+	USBD_Init(&USB_Device_dev,
+            &USR_desc, 
+            &DFU_cb, 
+            &USR_cb);
   
   while (!leave_dfu)
 	{

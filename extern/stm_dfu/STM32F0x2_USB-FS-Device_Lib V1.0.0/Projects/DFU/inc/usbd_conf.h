@@ -52,7 +52,9 @@
 /* Flash memory address from where user application will be loaded 
    This address represents the DFU code protected against write and erase operations.*/
 
-#define APP_DEFAULT_ADD                 0x08010000   // address of chromium-ec RW image
+// Change protect area : 20K RO (RO veriosn 0201 occupied size)
+#define RW_IMAGE_START_ADDRESS   0x08005000	// RO size : 20K
+#define APP_DEFAULT_ADD          RW_IMAGE_START_ADDRESS   // address of bizlink RW image
 
 /* Exported macro ------------------------------------------------------------*/
 /* Update this define to modify the DFU protected area.
