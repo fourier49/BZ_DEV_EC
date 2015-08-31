@@ -11,8 +11,8 @@ if [ ! -f build/$BOARD/ec.RW.bin ]; then
 	exit 1
 fi
 
-PID=`egrep -r '^#define *CONFIG_USB_PID'     board/$BOARD | sed -e 's/.*_USB_PID *\([^ ]*\).*/\1/' -e 's/0x//'`
-DID=`egrep -r '^#define *CONFIG_USB_BCD_DEV' board/$BOARD | sed -e 's/.*_USB_BCD_DEV *\([^ ]*\).*/\1/' -e 's/0x//'`
+PID=`egrep -r '^#define *CONFIG_USB_PID'     board/$BOARD | head -1 | sed -e 's/.*_USB_PID *\([^ ]*\).*/\1/' -e 's/0x//'`
+DID=`egrep -r '^#define *CONFIG_USB_BCD_DEV' board/$BOARD | head -1 | sed -e 's/.*_USB_BCD_DEV *\([^ ]*\).*/\1/' -e 's/0x//'`
 
 if egrep -r '^#define *BIZCFG_ENTER_DFU_VIA_BILLBOARD' board/$BOARD > /dev/null 2>&1; then
 	echo -e "\n\nRelease FW with Bizlink DFU/BOOT mode, PID=$PID DID=$DID"
