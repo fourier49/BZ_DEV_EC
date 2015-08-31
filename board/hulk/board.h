@@ -109,14 +109,6 @@
 #define I2C_PORT_SLAVE  0
 #define I2C_PORT_EC I2C_PORT_SLAVE
 
-/* USB configuration */
-#define CONFIG_USB_VENDOR_STR  "BizLink Technology Inc."
-#define CONFIG_USB_PRODUCT_STR "Hulk"
-#define CONFIG_USB_BB_URL      USB_BIZLINK_TYPEC_URL
-#define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0x6001
-#define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
-
 /* slave address for host commands */
 #ifdef HAS_TASK_HOSTCMD
 #define CONFIG_HOSTCMD_I2C_SLAVE_ADDR CONFIG_USB_PD_I2C_SLAVE_ADDR
