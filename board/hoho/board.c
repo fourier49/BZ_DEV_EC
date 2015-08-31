@@ -425,11 +425,11 @@ void set_billboard_status(uint16_t svid, uint8_t status)
 		}
 	}
 
-	bos_desc.bb_caps.bmConfigured[(index / 4)] &= ~(0x3 << (index * 2));
+	bos_desc.bb_caps.bmConfigured[(index / 4)] &= ~(0x3 << ((index % 4) * 2));
 
 	if(status <= ALT_MODE_CONFIG_SUCCESS)
 	{
-		bos_desc.bb_caps.bmConfigured[(index / 4)] |= (status << (index * 2));
+		bos_desc.bb_caps.bmConfigured[(index / 4)] |= (status << ((index % 4) * 2));
 		CPRINTF("[%s] bmConfigured = 0x%X\n", __FUNCTION__,
 			bos_desc.bb_caps.bmConfigured[(index / 4)]);
 
