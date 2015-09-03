@@ -25,6 +25,7 @@
 #include "usb_pd_config.h"
 #include "version.h"
 
+
 #ifdef CONFIG_COMMON_RUNTIME
 #define CPRINTF(format, args...) cprintf(CC_USBPD, format, ## args)
 #define CPRINTS(format, args...) cprints(CC_USBPD, format, ## args)
@@ -292,6 +293,8 @@ static struct pd_protocol {
 	uint16_t dev_id;
 	uint32_t dev_rw_hash[PD_RW_HASH_SIZE/4];
 	enum ec_current_image current_image;
+
+	uint32_t cancel_swap;
 } pd[PD_PORT_COUNT];
 
 /*
@@ -383,6 +386,22 @@ int pd_get_flags(int port, int *pr_role)
 	return pd[port].flags;
 }
 
+int pd_cancel_swap(int port,int Cancel)
+{
+	if(port < PD_STATE_COUNT){
+		pd[port].cancel_swap = Cancel;
+	}
+	return 0; 
+}
+
+int pd_is_cancel_swap(int port)
+{
+	if(port < PD_STATE_COUNT){
+		return pd[port].cancel_swap;
+	}
+	return -1;
+}
+
 static inline void set_state(int port, enum pd_states next_state)
 {
 	enum pd_states last_state = pd[port].task_state;
@@ -449,7 +468,7 @@ static inline void set_state(int port, enum pd_states next_state)
 		disable_sleep(SLEEP_MASK_USB_PD);
 #endif
 
-	CPRINTF("C%d st%d\n", port, next_state);
+	CPRINTF("C%d st:%d\n", port,next_state);
 }
 
 /* increment message ID counter */
@@ -622,7 +641,7 @@ static int send_validate_message(int port, uint16_t header,
 	}
 	/* we failed all the re-transmissions */
 	if (debug_level >= 1)
-		CPRINTF("TX NOACK%d %04x/%d\n", port, header, cnt);
+		CPRINTF("C%d TX NOACK %04x/%d\n", port, header, cnt);
 	return -1;
 }
 
@@ -635,7 +654,7 @@ static int send_control(int port, int type)
 	bit_len = send_validate_message(port, header, 0, NULL);
 
 	if (debug_level >= 1)
-		CPRINTF("CTRL[%d]>%d\n", type, bit_len);
+		CPRINTF("C%d CTRL[%d]>%d\n", port,type, bit_len);
 
 	return bit_len;
 }
@@ -687,7 +706,7 @@ static int send_source_cap(int port)
 }
 
 #ifdef CONFIG_USB_PD_DUAL_ROLE
-static void send_sink_cap(int port)
+static int send_sink_cap(int port)
 {
 	int bit_len;
 #ifdef CONFIG_USB_PD_DYNAMIC_SRC_CAP
@@ -703,8 +722,10 @@ static void send_sink_cap(int port)
 
 	bit_len = send_validate_message(port, header, snk_pdo_cnt,
 					snk_pdo);
-	if (debug_level >= 1)
-		CPRINTF("snkCAP>%d\n", bit_len);
+
+	return bit_len;
+	//if (debug_level >= 1)
+	//	CPRINTF("snkCAP>%d\n", bit_len);
 }
 
 static int send_request(int port, uint32_t rdo)
@@ -1397,7 +1418,7 @@ static void handle_request(int port, uint16_t head,
 	/* dump received packet content (only dump ping at debug level 2) */
 	if ((debug_level == 1 && PD_HEADER_TYPE(head) != PD_CTRL_PING) ||
 	    debug_level >= 2) {
-		CPRINTF("RECV %04x/%d ", head, cnt);
+		CPRINTS("[C%d RECV %04x/%d ", port,head, cnt);
 		for (p = 0; p < cnt; p++)
 			CPRINTF("[%d]%08x ", p, payload[p]);
 		CPRINTF("\n");
@@ -1407,8 +1428,10 @@ static void handle_request(int port, uint16_t head,
 	 * If we are in disconnected state, we shouldn't get a request. Do
 	 * a hard reset if we get one.
 	 */
-	if (!pd_is_connected(port))
+	if (!pd_is_connected(port)){
+		CPRINTF("C%d con fail %s \n", port , pd_state_names[pd[port].task_state]);
 		set_state(port, PD_STATE_HARD_RESET_SEND);
+		}
 
 	if (cnt)
 		handle_data_request(port, head, payload);
@@ -1587,7 +1610,7 @@ packet_err:
 	if (debug_level >= 2)
 		pd_dump_packet(port, msg);
 	else
-		CPRINTF("RXERR%d %s\n", port, msg);
+		CPRINTF("C%d:RXERR %s\n", port, msg);
 	return bit;
 }
 
@@ -1800,7 +1823,7 @@ int pd_get_role(int port)
 	return pd[port].power_role;
 }
 
-static int pd_is_power_swapping(int port)
+ int pd_is_power_swapping(int port)
 {
 	/* return true if in the act of swapping power roles */
 	return  pd[port].task_state == PD_STATE_SNK_SWAP_SNK_DISABLE ||
@@ -1944,7 +1967,7 @@ void pd_task(void)
 		pd_vdm_send_state_machine(port);
 
 		/* monitor for incoming packet if in a connected state */
-		if (pd_is_connected(port) && pd_comm_enabled)
+		if (pd_is_connected(port) && pd_comm_enabled )
 			pd_rx_enable_monitoring(port);
 		else
 			pd_rx_disable_monitoring(port);
@@ -1963,13 +1986,13 @@ void pd_task(void)
 		if (pd[port].send_error < 0) {
 			if (pd[port].send_error == -5)
 				/* Bus was not idle */
-				ccprintf("TX ERR NIDLE\n");
+				ccprintf("C%d TX ERR NIDLE\n",port);
 			else if (pd[port].send_error == -4)
 				/* Incoming packet recvd instead of ack */
-				ccprintf("TX ERR ACK\n");
+				ccprintf("C%d TX ERR ACK\n",port);
 			else if (pd[port].send_error == -6)
 				/* Incoming packet before we can send goodCRC */
-				ccprintf("TX ERR CRC\n");
+				ccprintf("C%d TX ERR CRC\n",port);
 			pd[port].send_error = 0;
 		}
 #endif
@@ -1980,11 +2003,13 @@ void pd_task(void)
 		if (pd_rx_started(port) && pd_comm_enabled) {
 			incoming_packet = 1;
 			head = pd_analyze_rx(port, payload);
+			ccprints("C%d rx_head %d \n" , port , head);
 			pd_rx_complete(port);
 			if (head > 0)
 				handle_request(port,  head, payload);
-			else if (head == PD_RX_ERR_HARD_RESET)
+			else if (head == PD_RX_ERR_HARD_RESET){
 				execute_hard_reset(port);
+			}
 		} else {
 			incoming_packet = 0;
 		}
@@ -2678,6 +2703,11 @@ void pd_task(void)
 			timeout = 200*MSEC;
 			break;
 		case PD_STATE_SNK_SWAP_INIT:
+			if(pd[port].cancel_swap == 1){
+				pd[port].cancel_swap = 0;
+				set_state( port, PD_STATE_SNK_READY);
+			}
+			
 			if (pd[port].last_state != pd[port].task_state) {
 				res = send_control(port, PD_CTRL_PR_SWAP);
 				if (res < 0) {
@@ -2700,6 +2730,10 @@ void pd_task(void)
 			}
 			break;
 		case PD_STATE_SNK_SWAP_SNK_DISABLE:
+			if(pd[port].cancel_swap == 1){
+				pd[port].cancel_swap = 0;
+				set_state(  port, PD_STATE_SNK_READY);
+			}
 			/* Stop drawing power */
 			pd_set_input_current_limit(port, 0, 0);
 #ifdef CONFIG_CHARGE_MANAGER
@@ -2710,6 +2744,10 @@ void pd_task(void)
 			timeout = 10*MSEC;
 			break;
 		case PD_STATE_SNK_SWAP_SRC_DISABLE:
+			if(pd[port].cancel_swap == 1){
+				pd[port].cancel_swap = 0;
+				set_state(0, PD_STATE_SNK_READY);
+			}
 			/* Wait for PS_RDY */
 			if (pd[port].last_state != pd[port].task_state)
 				set_state_timeout(port,
@@ -2718,6 +2756,10 @@ void pd_task(void)
 						  PD_STATE_HARD_RESET_SEND);
 			break;
 		case PD_STATE_SNK_SWAP_STANDBY:
+			if(pd[port].cancel_swap == 1){
+				pd[port].cancel_swap = 0;
+				set_state(  port, PD_STATE_SNK_READY);
+			}
 			if (pd[port].last_state != pd[port].task_state) {
 				/* Switch to Rp and enable power supply */
 				pd_set_host_mode(port, 1);
@@ -2738,6 +2780,10 @@ void pd_task(void)
 			}
 			break;
 		case PD_STATE_SNK_SWAP_COMPLETE:
+			if(pd[port].cancel_swap == 1){
+				pd[port].cancel_swap = 0;
+				set_state(  port, PD_STATE_SNK_DISCONNECTED);
+			}
 			/* Send PS_RDY and change to source role */
 			res = send_control(port, PD_CTRL_PS_RDY);
 			if (res < 0) {

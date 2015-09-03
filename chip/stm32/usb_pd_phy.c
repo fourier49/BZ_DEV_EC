@@ -323,16 +323,11 @@ int pd_start_tx(int port, int polarity, int bit_len)
 		return -5;
 #endif /* !CONFIG_USB_PD_TX_PHY_ONLY */
 
-	mutex_lock(&txtim_lock);
+	
 	/* Initialize spi peripheral to prepare for transmission. */
 	pd_tx_spi_init(port);
-
-	/*
-	 * Set timer to one tick before reset so that the first tick causes
-	 * a rising edge on the output.
-	 */
-	pd_phy[port].tim_tx->cnt = TX_CLOCK_DIV - 1;
-
+	
+	
 	/* update DMA configuration */
 	dma_prepare_tx(&(pd_phy[port].dma_tx_option),
 			DIV_ROUND_UP(bit_len, 8),
@@ -361,6 +356,12 @@ int pd_start_tx(int port, int polarity, int bit_len)
 	 * timing between enabling TX and clocking out bits.
 	 */
 	pd_tx_enable(port, polarity);
+	mutex_lock(&txtim_lock);
+	/*
+	 * Set timer to one tick before reset so that the first tick causes
+	 * a rising edge on the output.
+	 */
+	pd_phy[port].tim_tx->cnt = TX_CLOCK_DIV - 1;
 
 	/* Start counting at 300Khz*/
 	pd_phy[port].tim_tx->cr1 |= 1;

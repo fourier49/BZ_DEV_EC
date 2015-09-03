@@ -1517,4 +1517,8 @@ static inline void pd_log_event(uint8_t type, uint8_t size_port,
 static inline int pd_vdm_get_log_entry(uint32_t *payload) { return 0; }
 #endif /* CONFIG_USB_PD_LOGGING */
 
+ int pd_is_power_swapping(int port);
+int pd_cancel_swap(int port,int Cancel);
+
+
 #endif  /* __USB_PD_H */

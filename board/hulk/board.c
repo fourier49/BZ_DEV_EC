@@ -368,8 +368,6 @@ static void board_init(void)
 	pd_set_dual_role_port(0 , PD_DRP_TOGGLE_ON);
 	pd_set_dual_role_port(1 , PD_DRP_TOGGLE_OFF);
 	
-	hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
-
 	ccprints("board_init \n");
 
 }
@@ -503,6 +501,9 @@ void board_set_usb_mux(int port, enum typec_mux mux, enum usb_switch usb, int po
 {
 	const struct usb_port_mux *usb_mux = usb_muxes + port;
 
+	if(port == 1)
+		return;
+	
 	ccprints("C%d board_set_usb_mux m:%d u:%d \n",port,mux,usb);
 	/* reset everything */
 	gpio_set_level(usb_mux->dp_mode_l,    0);   // default: disable DP AUX
