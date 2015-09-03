@@ -26,6 +26,7 @@
 
 #define MAX_HPD_MSG_QUEUE   4
 #define HPD_MSG_QUEUE_GAP   (4*MSEC)
+#define NUMBER_OF_SVID 1
 
 static volatile uint64_t hpd_prev_ts;
 static volatile int hpd_prev_level;
@@ -363,15 +364,13 @@ static void board_init(void)
 	gpio_set_level(GPIO_USB_C_CC_EN, 1);
 #endif
   
-#ifdef CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
-	drp_states[0] = PD_DRP_TOGGLE_ON;
-	drp_states[1] = PD_DRP_TOGGLE_OFF;
-#endif
 
-hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
+	pd_set_dual_role_port(0 , PD_DRP_TOGGLE_ON);
+	pd_set_dual_role_port(1 , PD_DRP_TOGGLE_OFF);
+	
+	hook_call_deferred( pd_check_cpower_deferred, POWER_SIGNALS_DEBOUNCE_INTERVAL);
 
-ccprints("board_init \n");
-
+	ccprints("board_init \n");
 
 }
 DECLARE_HOOK(HOOK_INIT, board_init, HOOK_PRIO_DEFAULT);
@@ -433,7 +432,7 @@ struct my_bos {
 	struct usb_bos_hdr_descriptor bos;
 	struct usb_contid_caps_descriptor contid_caps;
 	struct usb_bb_caps_base_descriptor bb_caps;
-	struct usb_bb_caps_svid_descriptor bb_caps_svids[1];
+	struct usb_bb_caps_svid_descriptor bb_caps_svids[NUMBER_OF_SVID];
 };
 
 static struct my_bos bos_desc = {
@@ -477,7 +476,6 @@ const struct bos_context bos_ctx = {
 	.descp = (void *)&bos_desc,
 	.size = sizeof(struct my_bos),
 };
-
 
 
 //==============================================================================
@@ -629,3 +627,27 @@ void board_flip_usb_mux(int port)
 #endif
 }
 #endif
+
+void set_billboard_status(uint16_t svid, uint8_t status)
+{
+	uint8_t index = 0;
+
+	for(index = 0; index < NUMBER_OF_SVID; index++)
+	{
+		if(bos_desc.bb_caps_svids[index].wSVID == svid)
+		{
+			break;
+		}
+	}
+
+	bos_desc.bb_caps.bmConfigured[(index / 4)] &= ~(0x3 << ((index % 4) * 2));
+
+	if(status <= ALT_MODE_CONFIG_SUCCESS)
+	{
+		bos_desc.bb_caps.bmConfigured[(index / 4)] |= (status << ((index % 4) * 2));
+		CPRINTF("[%s] bmConfigured = 0x%X\n", __FUNCTION__,
+			bos_desc.bb_caps.bmConfigured[(index / 4)]);
+
+	}
+}
+

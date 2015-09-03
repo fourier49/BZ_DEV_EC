@@ -71,6 +71,14 @@ void pd_power_supply_reset(int port)
 
 int pd_board_checks(void)
 {
+	int port = 0;
+	if (!pd_is_connected(port))
+	{
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+		set_billboard_status(USB_SID_DISPLAYPORT, ALT_MODE_CONFIG_NOT_ATTMPT);
+#endif
+	}
+
 	return EC_SUCCESS;
 }
 
@@ -202,7 +210,9 @@ static int svdm_enter_mode(int port, uint32_t *payload)
 		rv = 1;
 	}
 	
-#ifndef CONFIG_USB_CONSOLE
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+
+#else
 //Beccause we need to establish usb connection when console needed. 
 	if (rv)
 		/*

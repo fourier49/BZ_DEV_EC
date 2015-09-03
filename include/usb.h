@@ -278,6 +278,9 @@ void usb_read_setup_packet(usb_uint *buffer, struct usb_setup_packet *packet);
  */
 void *memcpy_to_usbram(void *dest, const void *src, size_t n);
 void *memcpy_from_usbram(void *dest, const void *src, size_t n);
+#ifdef BIZCFG_ENTER_DFU_VIA_BILLBOARD
+void USB_BD_PARSER_CMD(void);
+#endif
 
 /* Compute the address inside dedicate SRAM for the USB controller */
 #define usb_sram_addr(x) ((x - __usb_ram_start) * sizeof(uint16_t))

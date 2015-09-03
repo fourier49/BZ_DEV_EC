@@ -54,9 +54,9 @@
 #define CONFIG_STM_HWTIMER32
 #undef  CONFIG_TASK_PROFILING
 #define CONFIG_USB
-#define CONFIG_USB_CONSOLE
+#undef CONFIG_USB_CONSOLE
 #define CONFIG_USB_BOS
-/* #define CONFIG_USB_INHIBIT_CONNECT */
+#define CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_CUSTOM_VDM
@@ -67,7 +67,9 @@
 #define CONFIG_USBC_SS_MUX
 #define CONFIG_USBC_VCONN
 #undef  CONFIG_WATCHDOG_HELP
-
+#define CONFIG_RSA
+#define CONFIG_RWSIG
+#define CONFIG_SHA256
 /*
  * DFP advised power (Type-C spec: Table 4-18 ~ 4-20)
  *-----------------------------------------------------
@@ -89,14 +91,6 @@
 #define I2C_PORT_MASTER 1
 #define I2C_PORT_SLAVE  0
 #define I2C_PORT_EC I2C_PORT_SLAVE
-
-/* USB configuration */
-#define CONFIG_USB_VENDOR_STR  "BizLink Technology Inc."
-#define CONFIG_USB_PRODUCT_STR "kronitech docking station"
-#define CONFIG_USB_BB_URL      USB_BIZLINK_TYPEC_URL
-#define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0x6001
-#define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
 /* slave address for host commands */
 #ifdef HAS_TASK_HOSTCMD

@@ -204,6 +204,7 @@ int pd_check_requested_voltage(uint32_t rdo)
 	return EC_SUCCESS;
 }
 
+
 void set_output_voltage(int vidx)
 {
 	gpio_set_level(GPIO_USB_P0_PWR_5V_EN, 0);
@@ -307,6 +308,7 @@ void pd_pwr_local_change(int pwr_in)
 	check_pr_role( 0, pwr_in );
 }
 
+
 int pd_set_power_supply_ready(int port)
 {
 	if(volt_idx== PDO_IDX_SRC_5V) {
@@ -375,23 +377,18 @@ int pd_check_power_swap(int port)
 	 * otherwise assume our role is fixed (not in S0 or console command
 	 * to fix our role).
 	 */
-#ifdef CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
+
 	//we won't accept change from sink->src if no c-power connected
-	if((pd_snk_is_vbus_provided(1) == 1) && 
-		(pd_get_dual_role(port) == PD_DRP_TOGGLE_ON)){
+	if((pd_snk_is_vbus_provided(1) == 1) && (pd_get_dual_role(port) == PD_DRP_TOGGLE_ON)){
 		CPRINTF("C%d ch_pw_swap - accept\n",port);
 		return 1;
-	}else if((pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ) &&
-		 (pr_role==PD_ROLE_SOURCE)) { //c-power is not connected
+	}else if((pd_get_dual_role(port) == PD_DRP_TOGGLE_ON ) && (pr_role==PD_ROLE_SOURCE)) { //c-power is not connected
 		//only allow change from src->snk.
 		CPRINTF("C%d ch_pw_swap - accept\n",port);
 		return 1;
 	}
 	CPRINTF("C%d ch_pw_swap - reject\n",port);
 	return 0;
-#else
-	return pd_get_dual_role() == PD_DRP_TOGGLE_ON ? 1 : 0;
-#endif
 }
 
 int pd_check_data_swap(int port, int data_role)
@@ -426,11 +423,8 @@ void pd_check_pr_role(int port, int pr_role, int flags)
 	 * if a power swap is necessary.
 	 */
 	if ((flags & PD_FLAGS_PARTNER_DR_POWER) &&
-#ifdef CONFIG_BIZLINK_DEFINE_DUAL_DRP_STATE
+
 		pd_get_dual_role(port) == PD_DRP_TOGGLE_ON) {
-#else
-	    pd_get_dual_role() == PD_DRP_TOGGLE_ON) {
-#endif
 		/*
 		 * If we are a sink and partner is not externally powered, then
 		 * swap to become a source. If we are source and partner is
@@ -510,9 +504,6 @@ DECLARE_DEFERRED(pd_cpower_unplung_deferred);
 void pd_check_cpower_deferred(void)
 {
 	uint32_t delay = 100*MSEC;
-#if (CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_RJ45) || ((CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP))
-	int pr_role;
-#endif
 	cpower_con_status_chaged_flag = (cpower_cur_connect_st == pd_snk_is_vbus_provided(1))?0:1;
 	cpower_cur_connect_st =  pd_snk_is_vbus_provided(1);
 
@@ -558,17 +549,6 @@ void pd_check_cpower_deferred(void)
 	pd_get_flags(0, &pr_role);
 	if((pr_role == PD_ROLE_SINK)||(pr_role == PD_ROLE_SOURCE)){
 			gpio_set_level(GPIO_DS_Discharge, 1);
-	}
-#endif
-
-#if CONFIG_BIZ_HULK_V2_0_HW_TYPE ==  CONFIG_BIZ_HULK_V2_0_TYPE_DP
-	//a workround to control rj45 hub power.
-	//becuase pd_get_flags will check the port state
-	//only in PD_STATE_SNK_READY or PD_STATE_SRC_READY
-	//the pr_role will be set.
-	pd_get_flags(0, &pr_role);
-	if((pr_role == PD_ROLE_SINK)||(pr_role == PD_ROLE_SOURCE)){
-			gpio_set_level(GPIO_PWRONZ, 0);
 	}
 #endif
 	if(0 != hook_call_deferred(pd_check_cpower_deferred, delay))

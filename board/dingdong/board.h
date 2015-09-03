@@ -23,9 +23,9 @@
 #define CONFIG_RWSIG
 #define CONFIG_SHA256
 #define CONFIG_USB
-#define CONFIG_USB_CONSOLE
+#undef CONFIG_USB_CONSOLE
 #define CONFIG_USB_BOS
-/* #define CONFIG_USB_INHIBIT_CONNECT */
+#define CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_HW_DEV_ID_BOARD_MAJOR USB_PD_HW_DEV_ID_DINGDONG
@@ -43,13 +43,7 @@
 #undef CONFIG_LID_SWITCH
 #undef CONFIG_TASK_PROFILING
 
-/* USB configuration */
-#define CONFIG_USB_VENDOR_STR  "BizLink Technology Inc."
-#define CONFIG_USB_PRODUCT_STR "Dingdong"
-#define CONFIG_USB_BB_URL      USB_BIZLINK_TYPEC_URL
-#define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0x5011
-#define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
+#include "biz_board.conf"
 
 /* No Write-protect GPIO, force the write-protection */
 /* #define CONFIG_WP_ALWAYS */

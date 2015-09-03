@@ -8,6 +8,8 @@
 #ifndef __BOARD_H
 #define __BOARD_H
 
+#include "biz_board.conf"
+
 /* 48 MHz SYSCLK clock frequency */
 #define CPU_CLOCK 48000000
 
@@ -30,9 +32,8 @@
 #define CONFIG_SPI_MASTER_PORT 2
 #define CONFIG_SPI_CS_GPIO GPIO_PD_MCDP_SPI_CS_L
 #define CONFIG_USB
-#define CONFIG_USB_CONSOLE
 #define CONFIG_USB_BOS
-/* #define CONFIG_USB_INHIBIT_CONNECT */
+#define CONFIG_USB_INHIBIT_CONNECT
 #define CONFIG_USB_POWER_DELIVERY
 #define CONFIG_USB_PD_ALT_MODE
 #define CONFIG_USB_PD_HW_DEV_ID_BOARD_MAJOR USB_PD_HW_DEV_ID_HOHO
@@ -54,14 +55,6 @@
 #undef CONFIG_WATCHDOG_HELP
 #undef CONFIG_LID_SWITCH
 #undef CONFIG_TASK_PROFILING
-
-/* USB configuration */
-#define CONFIG_USB_VENDOR_STR  "BizLink Technology Inc."
-#define CONFIG_USB_PRODUCT_STR "Hoho"
-#define CONFIG_USB_BB_URL      USB_BIZLINK_TYPEC_URL
-#define CONFIG_USB_VID         USB_VID_BIZLINK
-#define CONFIG_USB_PID 0x5010
-#define CONFIG_USB_BCD_DEV 0x0001 /* v 0.01 */
 
 /* No Write-protect GPIO, force the write-protection */
 /* #define CONFIG_WP_ALWAYS */

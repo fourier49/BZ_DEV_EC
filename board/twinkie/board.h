@@ -39,6 +39,18 @@
 #undef CONFIG_LID_SWITCH
 #undef CONFIG_TASK_PROFILING
 
+/* USB configuration */
+#define CONFIG_USB_VID 0x18D1
+#define CONFIG_USB_PID 0x500A
+
+#ifdef CONFIG_BIZ_EMU_DOCK
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN2      /* DAC_OUT2 PA5 */
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300) << 16   /* STD: 550 */
+#else
+#define CONFIG_PD_DAC_CR           STM32_DAC_CR_EN1      /* DAC_OUT1 PA4 */
+#define CONFIG_PD_DAC_VOUT         (550 * 4096 / 3300)   /* STD: 550 */
+#endif
+
 /* I2C ports configuration */
 #define I2C_PORT_MASTER 0
 
